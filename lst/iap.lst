@@ -1,0 +1,1065 @@
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     1
+
+
+MACRO ASSEMBLER AX51 V3.01a
+OBJECT MODULE PLACED IN .\obj\iap.obj
+ASSEMBLER INVOKED BY: H:\Prglan\Keil\C51\BIN\AX51.EXE src\iap.a51 SET(SMALL) DEBUG PRINT(.\lst\iap.lst) OBJECT(.\obj\iap
+                      .obj) EP
+
+LOC    OBJ             LINE     SOURCE
+
+                          1      ;-------------------------------------------------------------------------------;
+                          2                          $tt  ('In Application Programming driver')
+                          3      ;                             Version: 1.03.080311                              ;
+                          4      ;                                                                               ;
+                          5      ;                               Thomas Hoodger                                  ;
+                          6      ;                            Copyright (c) 2006-2008                            ;
+                          7      ;                         thomas.hoodger(at)gmail.com                           ;
+                          8      ;-------------------------------------------------------------------------------;
+                          9      ;                                                                               ;
+                         10      ;  Version history                                                              ;
+                         11      ;  ---------------                                                              ;
+                         12      ;   1.03  Added target MCU support                                              ;
+                         13      ;                                                                               ;
+                         14      ;   1.04  Error on including module target.def                                  ;
+                         15      ;                                                                               ;
+                         16      ;-------------------------------------------------------------------------------;
+                         17      ;  In Application Programming Method                                            ;
+                         18      ;  Several In Application Programming (IAP) calls are available for use b       ;
+                         19      ;  an application program to permit selective erasing and programming o         ;
+                         20      ;  Flash sectors. All calls are made through a common interface,                ;
+                         21      ;  TARGET_IAP_ROUTINE. The programming functions are selected by setting up     ;
+                         22      ;  the microcontroller’s registers before making a call to PGM_MTP at           ;
+                         23      ;  FFF0H. The oscillator frequency is an integer number rounded down            ;
+                         24      ;  to the nearest megahertz. For example, set R0 to 11 for 11.0592 MHz          ;
+                         25      ;  Results are returned in the registers. The IAP calls are shown in            ; 
+                         26      ;  Table 8.                                                                     ;
+                         27      ;                                                                               ;
+                         28      ;  Using the Watchdog Timer (WDT)                                               ;
+                         29      ;  The 89C51Rx2 devices support the use of the WDT in IAP. The user             ;
+                         30      ;  specifies that the WDT is to be fed by setting the most significant bit      ;
+                         31      ;  of the function parameter passed in R1 prior to calling PGM_MTP.             ;
+                         32      ;  The WDT function is only supported for Block Erase when using                ;
+                         33      ;  Quick Block Erase. The Quick Block Erase is specified by                     ;
+                         34      ;  performing a Block Erase with register R0 = 0. Requesting a WDT              ;
+                         35      ;  feed during IAP should only be performed in applications that use            ;
+                         36      ;  the WDT since the process of feeding the WDT will start the WDT if           ;
+                         37      ;  the WDT was not running.                                                     ;
+                         38      ;                                                                               ;
+                         39      ;-------------------------------------------------------------------------------;
+                         40     
+                         41     NAME IAP_DRV
+                         42     
+                         43     ; $NOMOD51
+                         44     ;$include (target.def)
+                    +1   45      
+                    +1   46     
+                    +1   47     
+                    +1   48     
+                    +1   49     
+                    +1   50     
+                    +1   51     
+                    +1   52     
+                    +1   53     
+                    +1   54         
+                    +1   55     
+                    +1   56         
+                    +1   57         
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     2
+
+                    +1   58         
+                    +1   59         
+                    +1   60     
+                    +1   61         
+                    +1   62         
+                    +1   63         
+                    +1   64         
+                    +1   65         
+                    +1   66         
+                    +1   67         
+                    +1   68         
+                    +1   69     
+                    +1   70         
+                    +1   71         
+                    +1   72         
+                    +1   73         
+                    +1   74     
+                    +1   75         
+                    +1   76         
+                    +1   77         
+                    +1   78         
+                    +1   79         
+                    +1   80         
+                    +1   81     
+                    +1   82         
+                    +1   83         
+                    +1   84         
+                    +1   85         
+                    +1   86         
+                    +1                  
+                    +1                  
+                    +1              
+                    +1          
+                    +1   91         
+                    +1                  
+                    +1                  
+                    +1              
+                    +1          
+                    +1   96         
+                    +1   97             
+                    +1   98             
+                    +1   99         
+                    +1  100     
+                    +1  101         
+                    +1                  
+                    +1                  
+                    +1              
+                    +1              
+                    +1  106         
+                    +1  107             
+                    +1  108             
+                    +1  109         
+                    +1  110         
+                    +1  111         
+                    +1                  
+                    +1                  
+                    +1              
+                    +1              
+                    +1  116         
+                    +1  117         
+                    +1  118     
+                    +1  119         
+                    +1  120         
+                    +1  121     
+                    +1  122         
+                    +1  123         
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     3
+
+                    +1  124         
+                    +1  125         
+                    +1  126     
+                    +1  127         
+                    +1  128         
+                    +1  129         
+                    +1  130             
+                    +1  131         
+                    +1                  
+                    +1              
+                    +1          
+                    +1  135         
+                    +1  136         
+                    +1  137         
+                    +1                  
+                    +1                  
+                    +1                  
+                    +1              
+                    +1          
+                    +1  143         
+                    +1  144             
+                    +1  145             
+                    +1  146             
+                    +1  147         
+                    +1  148     
+                    +1  149         
+                    +1                  
+                    +1                  
+                    +1                  
+                    +1              
+                    +1          
+                    +1  155         
+                    +1  156         
+                    +1  157         
+                    +1  158         
+                    +1  159         
+                    +1  160         
+                    +1  161         
+                    +1  162         
+                    +1  163         
+                    +1                  
+                    +1              
+                    +1          
+                    +1  167         
+                    +1  168             
+                    +1  169         
+                    +1  170     
+                    +1  171         
+                    +1                  
+                    +1              
+                    +1          
+                    +1  175         
+                    +1  176         
+                    +1  177         
+                    +1                  
+                    +1                  
+                    +1                  
+                    +1              
+                    +1                  
+                    +1  183             
+                    +1  184             
+                    +1  185         
+                    +1  186     
+                    +1  187         
+                    +1  188         
+                    +1  189         
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     4
+
+                    +1  190     
+                    +1  191         
+                    +1  192     
+                    +1  193     
+                        194     
+                        195     ;$include (at89c51xd2.inc)
+                    +1  196  +1 $save     
+                    +1  404  +1 $restore 
+                        405     
+                        406     
+                        407     
+                        408     IF 2 == 1
+                                    ; 8xC51RD2 Extensions
+                                    AUXR    DATA    08EH      ; By Thomas Hudger 06/07/26
+                                    AUXR1   DATA    0A2H      ; By Thomas Hudger 06/07/26
+                                ENDIF 
+                        413     
+                        414     IF 2==3
+                                    
+                                ENDIF 
+                        417     
+                        418     
+                        419     ; +---------------------------------------+
+                        420     ; |           Public routines             |
+                        421     ; +---------------------------------------+
+                        422         PUBLIC IAP_call_ISP_direct
+                        423     IF 2==3
+                                    PUBLIC IAP_reset_boot_status
+                                    PUBLIC IAP_reset_boot_vector
+                                ELSEIF (2==1 || 2==2)
+                        427         PUBLIC IAP_prog_data_byte;
+                        428         PUBLIC IAP_read_device_data;
+                        429         PUBLIC IAP_erase_block;
+                        430         PUBLIC IAP_read_mid;
+                        431         PUBLIC IAP_read_boot_vector;
+                        432         PUBLIC IAP_erase_boot_vector;
+                        433         PUBLIC _IAP_program_boot_vector;
+                        434         PUBLIC IAP_read_status_byte;
+                        435         PUBLIC _IAP_program_status_byte;
+                        436         PUBLIC IAP_read_security_bits;
+                        437         PUBLIC IAP_program_security_bits;
+                        438         PUBLIC IAP_read_device_id1;
+                        439         PUBLIC IAP_read_device_id2;
+                        440     ENDIF
+                        441         
+                        442         
+                        443         ; +---------------------------------------+
+                        444         ; |           Program DATA                |
+                        445         ; +---------------------------------------+
+------                  446         IAP_DATA        SEGMENT DATA
+------                  447         RSEG            IAP_DATA
+                        448         
+000000                  449         IAP_BYTE:       DS      1
+                        450         
+                        451         
+                        452         ; +---------------------------------------+
+                        453         ; |           Program CODE                |
+                        454         ; +---------------------------------------+
+------                  455         IAP_CODE        SEGMENT CODE
+------                  456         RSEG            IAP_CODE
+                        457         
+                        458         
+                        459         ; +---------------------------------------+
+                        460         ; |        Register bank select           |
+                        461         ; +---------------------------------------+
+                        462         USING 0
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     5
+
+                        463         
+                        464         ; +-----------------------------+
+                        465         ; | Call ISP code directly      |
+                        466         ; +-----------------------------+
+000000                  467         IAP_call_ISP_direct:
+000000 C0A8             468             push IEN0 ; save EA Status
+000002 C0A8             469             push    IEN0
+000004 C2AF             470             clr     EA                  ; disable int's
+000006 12FFF0           471             lcall   0xFFF0
+000009 D0A8             472             pop IEN0 ; load EA status
+00000B 22               473             RET
+                        474     
+                        475     IF 2 == 3
+                                    
+                                    ; AUXR1 = 8 ... sw reset
+                                
+                                    ;------------------------------;
+                                    ; set boot status for the ISP  ;
+                                    ;------------------------------;
+                                    IAP_reset_boot_status:
+                                        push    IEN0            ; save EA Status
+                                        clr     EA              ; disable int's
+                                
+                                        mov     R0,     #0FFH   ; IAP authourisation key first
+                                        mov     @R0,    #96H
+                                        mov     A,      #02
+                                        mov     R5,     #01     ; write bootstat with 01H
+                                        mov     R7,     #03
+                                
+                                        lcall   0xFFF0
+                                        pop     IEN0            ; restore EA status
+                                        RET
+                                            
+                                
+                                    ;-----------------------------;
+                                    ; set boot vector for the ISP ;
+                                    ;-----------------------------;
+                                    IAP_reset_boot_vector:
+                                        push    IEN0            ; save EA Status
+                                        clr     EA              ; disable int's
+                                
+                                        mov     R0,     #0FFH   ; IAP authorisation key first
+                                        mov     @R0,    #96H
+                                        mov     A,      #02
+                                        mov     R5,     #1FH    ; write bootvec with 1FH
+                                        mov     R7,     #02
+                                
+                                        lcall   0xFFF0
+                                        pop     IEN0            ; restore EA status
+                                        RET
+                                
+                                      
+                                ELSEIF (2==1 || 2==2)
+                        516         ; +----------------------------------------------------------------------+
+                        517         ; |                       PROGRAM DATA BYTE                              |
+                        518         ; +----------------------------------------------------------------------+
+                        519         ;  uchar IAP_ProgDataByte( uchar *DataPtr, uchar Bytes );
+                        520         ; 
+                        521         ;  Input Parameters:
+                        522         ;    R0 = osc freq (integer)
+                        523         ;    R1 = 02h
+                        524         ;    R1 = 82h (WDT feed)
+                        525         ;    DPTR = address of byte to program
+                        526         ;    ACC = byte to program
+                        527         ;  Return Parameter
+                        528         ;    ACC = 00 if pass, !00 if fail
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     6
+
+                        529         
+00000C                  530         IAP_prog_data_byte:
+                        531         
+                        532                 ;  Vstupy:
+                        533                 ;  R1 ... #LOW  Buf
+                        534                 ;  R2 ... #HIGH Buf
+                        535                 ;  R3 ... Typ pameti Buf
+                        536                 ;  R5 ... Zapisovany byte
+                        537         
+00000C C0A8             538                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+00000E C2AF             539                 CLR   EA                            ; Zakaz vsech preruseni
+000010 C0E0             540                 PUSH  Acc                           ; Uloz akumulator
+000012 C083             541                 PUSH  DPH
+000014 C082             542                 PUSH  DPL
+                        543         
+000016 43A220           544                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+000019 ED               545                 MOV   A,   R5                       ; Zkopiruj z parametru zapisovany byte
+00001A 8982             546                 MOV   DPL, R1                       ; Dolni byte cilove adresy dat
+00001C 8A83             547                 MOV   DPH, R2                       ; Horni byte cilove adresy dat
+00001E 7812             548                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+000020 7902             549                 MOV   R1,  #02h                     ; Nastav ID prikazu (API)
+000022 12FFF0           550                 CALL  0xFFF0            ; Zavolej rutinu bootloaderu PGM_MTP
+000025 AFE0             551                 MOV   R7,  Acc                      ; Zapis status do vracene hodnoty
+                        552         
+000027 D082             553                 POP   DPL
+000029 D083             554                 POP   DPH
+00002B D0E0             555                 POP   Acc                           ; Obnov akumulator
+00002D D0A8             556                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+00002F 22               557                 RET
+                        558         
+                        559                 ;  Vystupy:
+                        560                 ;  R7 ... Status
+                        561         
+                        562         
+                        563         ; +----------------------------------------------------------------------+
+                        564         ; |                        READ DEVICE DATA                              |
+                        565         ; +----------------------------------------------------------------------+
+                        566         ;  uchar IAP_ReadDeviceData( uchar *DataPtr, uchar Bytes );
+                        567         ; 
+                        568         ;  Input Parameters:
+                        569         ;    R1 = 03h
+                        570         ;    R1 = 83h (WDT feed)
+                        571         ;    DPTR = address of byte to read
+                        572         ;  Return Parameter
+                        573         ;    ACC = value of byte read
+                        574         
+000030                  575         IAP_read_device_data:
+                        576         
+                        577                 ;  Vstupy:
+                        578                 ;  R1 ... #LOW  source
+                        579                 ;  R2 ... #HIGH source
+                        580                 ;  R3 ... Typ pameti
+                        581         
+000030 C0A8             582                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000032 C2AF             583                 CLR   EA                            ; Zakaz vsech preruseni
+000034 C0E0             584                 PUSH  Acc                           ; Uloz akumulator
+000036 C083             585                 PUSH  DPH
+000038 C082             586                 PUSH  DPL
+                        587         
+00003A 43A220           588                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+00003D 7812             589                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+00003F 7903             590                 MOV   R1,  #03h                     ; Nastav ID prikazu (API)
+000041 8982             591                 MOV   DPL, R1                       ; Dolni byte cilove adresy dat
+000043 8A83             592                 MOV   DPH, R2                       ; Horni byte cilove adresy dat
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     7
+
+000045 12FFF0           593                 CALL  0xFFF0            ; Zavolej rutinu bootloaderu PGM_MTP
+000048 AFE0             594                 MOV   R7,  Acc                      ; Zapis vracenou hodnoty
+                        595         
+00004A D082             596                 POP   DPL
+00004C D083             597                 POP   DPH
+00004E D0E0             598                 POP   Acc                           ; Obnov akumulator
+000050 D0A8             599                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000052 22               600                 RET
+                        601         
+                        602                 ;  Vystupy:
+                        603                 ;  R7 ... Nacteny byte
+                        604         
+                        605         
+                        606         
+                        607         ; +----------------------------------------------------------------------+
+                        608         ; |                            ERASE BLOCK                               |
+                        609         ; +----------------------------------------------------------------------+
+                        610         ;  void IAP_erase_block( uchar BlockID );
+                        611         ; 
+                        612         ;  Input Parameters:
+                        613         ;    R0 = osc freq (integer)
+                        614         ;    R0 = 0 (Quick Erase)
+                        615         ;    R1 = 01h
+                        616         ;    R1 = 81h (WDT feed)
+                        617         ;    DPH = block code as shown below:
+                        618         ;          block 0,  0k to  8k, 00H
+                        619         ;          block 1,  8k to 16k, 20H
+                        620         ;          block 2, 16k to 32k, 40H
+                        621         ;          block 3, 32k to 48k, 80H
+                        622         ;          block 4, 48k to 64k, C0H
+                        623         ;    DPL = 00h
+                        624         ;  Return Parameter
+                        625         ;    none
+                        626         
+000053                  627         IAP_erase_block:
+                        628         
+                        629                 ;  Vstupy:
+                        630                 ;  R7 ... ID bloku dat
+                        631         
+000053 C0A8             632                 push IEN0 ; save EA Status              ; Uloz stav vsech preruseni
+000055 C2AF             633                 CLR   EA                              ; Zakaz vsech preruseni
+000057 C083             634                 PUSH  DPH
+000059 C082             635                 PUSH  DPL
+                        636         
+00005B 43A220           637                 ORL   AUXR1, #20h                     ; Aktivace bitu ENDBOOT (Enable shadow
+                               ed BOOTROM)
+00005E 7812             638                 MOV   R0,    #18        ; Zapis frekvenci oscilatoru
+000060 7901             639                 MOV   R1,    #01h                     ; Nastav ID prikazu (API)
+000062 8F83             640                 MOV   DPH,   R7                       ; ID bloku dat
+000064 758200           641                 MOV   DPL,   #00                      ;
+000067 12FFF0           642                 CALL  0xFFF0              ; Zavolej rutinu bootloaderu PGM_MTP
+                        643         
+00006A D082             644                 POP   DPL
+00006C D083             645                 POP   DPH
+00006E D0A8             646                 pop IEN0 ; load EA status          ; Obnov stav vsech preruseni
+000070 22               647                 RET
+                        648         
+                        649                 ;  Vystupy:
+                        650         
+                        651         
+                        652         
+                        653         ; +----------------------------------------------------------------------+
+                        654         ; |                       READ MANUFACTURER ID                           |
+                        655         ; +----------------------------------------------------------------------+
+                        656         ;  uchar IAP_read_mid();
+                        657         ; 
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     8
+
+                        658         ;  Input Parameters:
+                        659         ;    R0 = osc freq (integer)
+                        660         ;    R1 = 00h
+                        661         ;    DPH = 00h
+                        662         ;    DPL = 00h (manufacturer ID)
+                        663         ;  Return Parameter
+                        664         ;    ACC = value of byte read
+                        665         
+000071                  666         IAP_read_mid:
+                        667                 ;  Vstupy:
+                        668         
+000071 C0A8             669                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000073 C2AF             670                 CLR   EA                            ; Zakaz vsech preruseni
+000075 C0E0             671                 PUSH  Acc                           ; Uloz akumulator
+000077 C083             672                 PUSH  DPH
+000079 C082             673                 PUSH  DPL
+00007B 43A220           674                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+00007E 7812             675                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+000080 7900             676                 MOV   R1,  #00H                     ; read misc function
+000082 900000           677                 MOV   DPTR,#0000H                   ; specify MID
+000085 12FFF0           678                 CALL  0xFFF0            ; execute the function
+000088 AFE0             679                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+00008A D082             680                 POP   DPL
+00008C D083             681                 POP   DPH
+00008E D0E0             682                 POP   Acc                           ; Obnov akumulator
+000090 D0A8             683                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000092 22               684                 RET
+                        685         
+                        686                 ;  Vystupy:
+                        687                 ;  R7 ... ID (15h = Philips)
+                        688         
+                        689         
+                        690         ; +----------------------------------------------------------------------+
+                        691         ; |                          READ BOOT VECTOR                            |
+                        692         ; +----------------------------------------------------------------------+
+                        693         ;  uchar IAP_ReadBootVector();
+                        694         ; 
+                        695         ;  Input Parameters:
+                        696         ;    R0 = osc freq (integer)
+                        697         ;    R1 = 07h
+                        698         ;    R1 = 87h (WDT feed)
+                        699         ;    DPH = 00h
+                        700         ;    DPL = 02h (boot vector)
+                        701         ;  Return Parameter
+                        702         ;    ACC = value of byte read
+                        703         
+000093                  704         IAP_read_boot_vector:
+                        705                 ;  Vstupy:
+                        706         
+000093 C0A8             707                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000095 C2AF             708                 CLR   EA                            ; Zakaz vsech preruseni
+000097 C0E0             709                 PUSH  Acc                           ; Uloz akumulator
+000099 C083             710                 PUSH  DPH
+00009B C082             711                 PUSH  DPL
+00009D 43A220           712                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+0000A0 7812             713                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+0000A2 7907             714                 MOV   R1,  #07h                     ; Nastav ID prikazu (API)
+0000A4 758300           715                 MOV   DPH, #00h                     ;
+0000A7 758202           716                 MOV   DPL, #02h                     ; ID pro Boot vector
+0000AA 12FFF0           717                 CALL  0xFFF0            ; execute the function
+0000AD AFE0             718                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+0000AF D082             719                 POP   DPL
+0000B1 D083             720                 POP   DPH
+0000B3 D0E0             721                 POP   Acc                           ; Obnov akumulator
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE     9
+
+0000B5 D0A8             722                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+0000B7 22               723                 RET
+                        724         
+                        725                 ;  Vystupy:
+                        726                 ;  R7 ... Boot vector
+                        727         
+                        728         
+                        729         ; +----------------------------------------------------------------------+
+                        730         ; |                         ERASE BOOT VECTOR                            |
+                        731         ; +----------------------------------------------------------------------+
+                        732         ;  void IAP_EraseBootVector();
+                        733         ; 
+                        734         ;  Input Parameters:
+                        735         ;    R0 = osc freq (integer)
+                        736         ;    R1 = 04h
+                        737         ;    R1 = 84h (WDT feed)
+                        738         ;    DPH = 00h
+                        739         ;    DPL = don’t care
+                        740         ;  Return Parameter
+                        741         ;    none
+                        742         
+0000B8                  743         IAP_erase_boot_vector:
+                        744                 ;  Vstupy:
+                        745         
+0000B8 C0A8             746                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+0000BA C2AF             747                 CLR   EA                            ; Zakaz vsech preruseni
+0000BC C0E0             748                 PUSH  Acc                           ; Uloz akumulator
+0000BE C083             749                 PUSH  DPH
+0000C0 C082             750                 PUSH  DPL
+0000C2 43A220           751                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+0000C5 7812             752                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+0000C7 7904             753                 MOV   R1,  #04h                     ; Nastav ID prikazu (API)
+0000C9 758300           754                 MOV   DPH, #00h                     ;
+0000CC 758200           755                 MOV   DPL, #00h                     ; ID pro Boot vector
+0000CF 12FFF0           756                 CALL  0xFFF0            ; execute the function
+0000D2 D082             757                 POP   DPL
+0000D4 D083             758                 POP   DPH
+0000D6 D0E0             759                 POP   Acc                           ; Obnov akumulator
+0000D8 D0A8             760                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+0000DA 22               761                 RET
+                        762         
+                        763                 ;  Vystupy:
+                        764                 ;  R7 ... Boot vector
+                        765         
+                        766         
+                        767         
+                        768         ; +----------------------------------------------------------------------+
+                        769         ; |                       PROGRAM BOOT VECTOR                            |
+                        770         ; +----------------------------------------------------------------------+
+                        771         ;  uchar IAP_ProgramBootVector(uchar BootVector);
+                        772         ; 
+                        773         ;  Input Parameters:
+                        774         ;    R0 = osc freq (integer)
+                        775         ;    R1 = 06h
+                        776         ;    R1 = 86h (WDT feed)
+                        777         ;    DPH = 00h
+                        778         ;    DPL = 01h – program boot vector
+                        779         ;    ACC = boot vector
+                        780         ;  Return Parameter
+                        781         ;    ACC = boot vector
+                        782         
+0000DB                  783         _IAP_program_boot_vector:
+                        784                 ;  Vstupy:
+                        785         
+0000DB C0A8             786                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    10
+
+0000DD C2AF             787                 CLR   EA                            ; Zakaz vsech preruseni
+0000DF C0E0             788                 PUSH  Acc                           ; Uloz akumulator
+0000E1 C083             789                 PUSH  DPH
+0000E3 C082             790                 PUSH  DPL
+0000E5 43A220           791                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+0000E8 7812             792                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+0000EA 7906             793                 MOV   R1,  #06h                     ; Nastav ID prikazu (API)
+0000EC 758300           794                 MOV   DPH, #00h                     ;
+0000EF 758201           795                 MOV   DPL, #01h                     ; ID pro Boot vector
+0000F2 8FE0             796                 MOV   Acc, R7                       ; Zkopiruj hodnotu z parametru do Acc
+0000F4 12FFF0           797                 CALL  0xFFF0            ; execute the function
+0000F7 AFE0             798                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+0000F9 D082             799                 POP   DPL
+0000FB D083             800                 POP   DPH
+0000FD D0E0             801                 POP   Acc                           ; Obnov akumulator
+0000FF D0A8             802                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000101 22               803                 RET
+                        804         
+                        805                 ;  Vystupy:
+                        806                 ;  R7 ... Boot vector
+                        807         
+                        808         
+                        809         ; +----------------------------------------------------------------------+
+                        810         ; |                          READ STATUS BYTE                            |
+                        811         ; +----------------------------------------------------------------------+
+                        812         ;  uchar IAP_ReadStatusByte();
+                        813         ; 
+                        814         ;  Input Parameters:
+                        815         ;    R0 = osc freq (integer)
+                        816         ;    R1 = 07h
+                        817         ;    R1 = 87h (WDT feed)
+                        818         ;    DPH = 00h
+                        819         ;    DPL = 01h (status byte)
+                        820         ;  Return Parameter
+                        821         ;    ACC = value of byte read
+                        822         
+000102                  823         IAP_read_status_byte:
+                        824                 ;  Vstupy:
+                        825         
+000102 C0A8             826                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000104 C2AF             827                 CLR   EA                            ; Zakaz vsech preruseni
+000106 C0E0             828                 PUSH  Acc                           ; Uloz akumulator
+000108 C083             829                 PUSH  DPH
+00010A C082             830                 PUSH  DPL
+00010C 43A220           831                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+00010F 7812             832                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+000111 7907             833                 MOV   R1,  #07h                     ; Nastav ID prikazu (API)
+000113 758300           834                 MOV   DPH, #00h                     ;
+000116 758201           835                 MOV   DPL, #01h                     ; ID pro Status byte
+000119 12FFF0           836                 CALL  0xFFF0            ; execute the function
+00011C AFE0             837                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+00011E D082             838                 POP   DPL
+000120 D083             839                 POP   DPH
+000122 D0E0             840                 POP   Acc                           ; Obnov akumulator
+000124 D0A8             841                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000126 22               842                 RET
+                        843         
+                        844                 ;  Vystupy:
+                        845                 ;  R7 ... Status byte
+                        846         
+                        847         
+                        848         ; +----------------------------------------------------------------------+
+                        849         ; |                       PROGRAM STATUS BYTE                            |
+                        850         ; +----------------------------------------------------------------------+
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    11
+
+                        851         ;  uchar IAP_ProgramStatusByte(uchar StatusByte);
+                        852         ; 
+                        853         ;  Input Parameters:
+                        854         ;    R0 = osc freq (integer)
+                        855         ;    R1 = 06h
+                        856         ;    R1 = 86h (WDT feed)
+                        857         ;    DPH = 00h
+                        858         ;    DPL = 00h – program status byte
+                        859         ;    ACC = status byte
+                        860         ;  Return Parameter
+                        861         ;    ACC = status byte
+                        862         
+000127                  863         _IAP_program_status_byte:
+                        864         
+000127 C0A8             865                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000129 C2AF             866                 CLR   EA                            ; Zakaz vsech preruseni
+00012B C0E0             867                 PUSH  Acc                           ; Uloz akumulator
+00012D C083             868                 PUSH  DPH
+00012F C082             869                 PUSH  DPL
+000131 43A220           870                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+000134 7812             871                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+000136 7906             872                 MOV   R1,  #06h                     ; Nastav ID prikazu (API)
+000138 758300           873                 MOV   DPH, #00h                     ;
+00013B 758200           874                 MOV   DPL, #00h                     ; ID pro Status byte
+00013E 8FE0             875                 MOV   Acc, R7                       ; Zkopiruj hodnotu z parametru do Acc
+000140 12FFF0           876                 CALL  0xFFF0            ; execute the function
+000143 AFE0             877                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+000145 D082             878                 POP   DPL
+000147 D083             879                 POP   DPH
+000149 D0E0             880                 POP   Acc                           ; Obnov akumulator
+00014B D0A8             881                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+00014D 22               882                 RET
+                        883         
+                        884                 ;  Vystupy:
+                        885                 ;  R7 ... Status byte
+                        886         
+                        887         
+                        888         
+                        889         ; +----------------------------------------------------------------------+
+                        890         ; |                         READ SECURITY BITS                           |
+                        891         ; +----------------------------------------------------------------------+
+                        892         ;  uchar IAP_ReadSecurityBits();
+                        893         ; 
+                        894         ;  Input Parameters:
+                        895         ;    R0 = osc freq (integer)
+                        896         ;    R1 = 07h
+                        897         ;    R1 = 87h (WDT feed)
+                        898         ;    DPH = 00h
+                        899         ;    DPL = 00h (security bits)
+                        900         ;  Return Parameter
+                        901         ;    ACC = value of byte read
+                        902         
+00014E                  903         IAP_read_security_bits:
+                        904                 ;  Vstupy:
+                        905         
+00014E C0A8             906                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000150 C2AF             907                 CLR   EA                            ; Zakaz vsech preruseni
+000152 C0E0             908                 PUSH  Acc                           ; Uloz akumulator
+000154 C083             909                 PUSH  DPH
+000156 C082             910                 PUSH  DPL
+000158 43A220           911                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+00015B 7812             912                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+00015D 7907             913                 MOV   R1,  #07h                     ; Nastav ID prikazu (API)
+00015F 758300           914                 MOV   DPH, #00h                     ;
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    12
+
+000162 758200           915                 MOV   DPL, #00h                     ; ID pro Security bits
+000165 12FFF0           916                 CALL  0xFFF0            ; execute the function
+000168 AFE0             917                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+00016A D082             918                 POP   DPL
+00016C D083             919                 POP   DPH
+00016E D0E0             920                 POP   Acc                           ; Obnov akumulator
+000170 D0A8             921                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000172 22               922                 RET
+                        923         
+                        924                 ;  Vystupy:
+                        925                 ;  R7 ... Security bits
+                        926         
+                        927         
+                        928         ; +----------------------------------------------------------------------+
+                        929         ; |                      PROGRAM SECURITY BITS                           |
+                        930         ; +----------------------------------------------------------------------+
+                        931         ;  void IAP_ProgramSecurityBits(uchar SecurityBits);
+                        932         ; 
+                        933         ;  Input Parameters:
+                        934         ;    R0 = osc freq (integer)
+                        935         ;    R1 = 05h
+                        936         ;    R1 = 85h (WDT feed)
+                        937         ;    DPH = 00h
+                        938         ;    DPL = 00h – security bit # 1 (inhibit writing to Flash)
+                        939         ;          01h – security bit # 2 (inhibit Flash verify)
+                        940         ;          02h – security bit # 3 (disable external memory)
+                        941         ;  Return Parameter
+                        942         ;    none
+                        943         
+000173                  944         IAP_program_security_bits:
+                        945         
+000173 C0A8             946                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000175 C2AF             947                 CLR   EA                            ; Zakaz vsech preruseni
+000177 C0E0             948                 PUSH  Acc                           ; Uloz akumulator
+000179 C083             949                 PUSH  DPH
+00017B C082             950                 PUSH  DPL
+00017D 43A220           951                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+000180 7812             952                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+000182 7905             953                 MOV   R1,  #05h                     ; Nastav ID prikazu (API)
+000184 758300           954                 MOV   DPH, #00h                     ;
+000187 8F82             955                 MOV   DPL, R7                       ; Zkopiruj hodnotu Security bits z R7
+000189 12FFF0           956                 CALL  0xFFF0            ; execute the function
+00018C D082             957                 POP   DPL
+00018E D083             958                 POP   DPH
+000190 D0E0             959                 POP   Acc                           ; Obnov akumulator
+000192 D0A8             960                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+000194 22               961                 RET
+                        962         
+                        963         
+                        964         
+                        965         
+                        966         ; +----------------------------------------------------------------------+
+                        967         ; |                         READ DEVICE ID # 1                           |
+                        968         ; +----------------------------------------------------------------------+
+                        969         ;  uchar IAP_read_device_id1();
+                        970         ; 
+                        971         ;  Input Parameters:
+                        972         ;    R0 = osc freq (integer)
+                        973         ;    R1 = 00h
+                        974         ;    R1 = 80h (WDT feed)
+                        975         ;    DPH = 00h
+                        976         ;    DPL = 01h (device ID # 1)
+                        977         ;  Return Parameter
+                        978         ;    ACC = value of byte read
+                        979         
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    13
+
+000195                  980         IAP_read_device_id1:
+                        981                 ;  Vstupy:
+                        982         
+000195 C0A8             983                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+000197 C2AF             984                 CLR   EA                            ; Zakaz vsech preruseni
+000199 C0E0             985                 PUSH  Acc                           ; Uloz akumulator
+00019B C083             986                 PUSH  DPH
+00019D C082             987                 PUSH  DPL
+00019F 43A220           988                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+0001A2 7812             989                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+0001A4 7900             990                 MOV   R1,  #00h                     ; Nastav ID prikazu (API)
+0001A6 758300           991                 MOV   DPH, #00h                     ;
+0001A9 758201           992                 MOV   DPL, #01h                     ; Device ID #1
+0001AC 12FFF0           993                 CALL  0xFFF0            ; execute the function
+0001AF AFE0             994                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+0001B1 D082             995                 POP   DPL
+0001B3 D083             996                 POP   DPH
+0001B5 D0E0             997                 POP   Acc                           ; Obnov akumulator
+0001B7 D0A8             998                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+0001B9 22               999                 RET
+                       1000         
+                       1001                 ;  Vystupy:
+                       1002                 ;  R7 ... Status byte
+                       1003         
+                       1004         
+                       1005         ; +----------------------------------------------------------------------+
+                       1006         ; |                         READ DEVICE ID # 2                           |
+                       1007         ; +----------------------------------------------------------------------+
+                       1008         ;  uchar IAP_read_device_id2();
+                       1009         ; 
+                       1010         ;  Input Parameters:
+                       1011         ;    R0 = osc freq (integer)
+                       1012         ;    R1 = 00h
+                       1013         ;    R1 = 80h (WDT feed)
+                       1014         ;    DPH = 00h
+                       1015         ;    DPL = 02h (device ID # 1)
+                       1016         ;  Return Parameter
+                       1017         ;    ACC = value of byte read
+                       1018         
+0001BA                 1019         IAP_read_device_id2:
+                       1020                 ;  Vstupy:
+                       1021         
+0001BA C0A8            1022                 push IEN0 ; save EA Status            ; Uloz stav vsech preruseni
+0001BC C2AF            1023                 CLR   EA                            ; Zakaz vsech preruseni
+0001BE C0E0            1024                 PUSH  Acc                           ; Uloz akumulator
+0001C0 C083            1025                 PUSH  DPH
+0001C2 C082            1026                 PUSH  DPL
+0001C4 43A220          1027                 ORL   AUXR1, #20h                   ; Aktivace bitu ENDBOOT (Enable shadowed
+                                BOOTROM)
+0001C7 7812            1028                 MOV   R0,  #18        ; Zapis frekvenci oscilatoru
+0001C9 7900            1029                 MOV   R1,  #00h                     ; Nastav ID prikazu (API)
+0001CB 758300          1030                 MOV   DPH, #00h                     ;
+0001CE 758202          1031                 MOV   DPL, #02h                     ; Device ID #2
+0001D1 12FFF0          1032                 CALL  0xFFF0            ; execute the function
+0001D4 AFE0            1033                 MOV   R7,  Acc                      ; Zkopiruj vystup do R7
+0001D6 D082            1034                 POP   DPL
+0001D8 D083            1035                 POP   DPH
+0001DA D0E0            1036                 POP   Acc                           ; Obnov akumulator
+0001DC D0A8            1037                 pop IEN0 ; load EA status        ; Obnov stav vsech preruseni
+0001DE 22              1038                 RET
+                       1039         
+                       1040                 ;  Vystupy:
+                       1041                 ;  R7 ... Status byte
+                       1042         
+                       1043         
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    14
+
+                       1044         
+                       1045     ENDIF
+                       1046     END
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    15
+
+SYMBOL TABLE LISTING
+------ ----- -------
+
+
+N A M E                    T Y P E  V A L U E     ATTRIBUTES
+
+_IAP_PROGRAM_BOOT_VECTOR.  C  ADDR  00DBH     R   SEG=IAP_CODE
+_IAP_PROGRAM_STATUS_BYTE.  C  ADDR  0127H     R   SEG=IAP_CODE
+AC. . . . . . . . . . . .  B  ADDR  00D0H.6   A   
+ACC . . . . . . . . . . .  D  ADDR  00E0H     A   
+AUXR. . . . . . . . . . .  D  ADDR  008EH     A   
+AUXR1 . . . . . . . . . .  D  ADDR  00A2H     A   
+B . . . . . . . . . . . .  D  ADDR  00F0H     A   
+BDRCON. . . . . . . . . .  D  ADDR  009BH     A   
+BRL . . . . . . . . . . .  D  ADDR  009AH     A   
+C_T2. . . . . . . . . . .  B  ADDR  00C8H.1   A   
+CCAP0H. . . . . . . . . .  D  ADDR  00FAH     A   
+CCAP0L. . . . . . . . . .  D  ADDR  00EAH     A   
+CCAP1H. . . . . . . . . .  D  ADDR  00FBH     A   
+CCAP1L. . . . . . . . . .  D  ADDR  00EBH     A   
+CCAP2H. . . . . . . . . .  D  ADDR  00FCH     A   
+CCAP2L. . . . . . . . . .  D  ADDR  00ECH     A   
+CCAP3H. . . . . . . . . .  D  ADDR  00FDH     A   
+CCAP3L. . . . . . . . . .  D  ADDR  00EDH     A   
+CCAP4H. . . . . . . . . .  D  ADDR  00FEH     A   
+CCAP4L. . . . . . . . . .  D  ADDR  00EEH     A   
+CCAPM0. . . . . . . . . .  D  ADDR  00DAH     A   
+CCAPM1. . . . . . . . . .  D  ADDR  00DBH     A   
+CCAPM2. . . . . . . . . .  D  ADDR  00DCH     A   
+CCAPM3. . . . . . . . . .  D  ADDR  00DDH     A   
+CCAPM4. . . . . . . . . .  D  ADDR  00DEH     A   
+CCF0. . . . . . . . . . .  B  ADDR  00D8H.0   A   
+CCF1. . . . . . . . . . .  B  ADDR  00D8H.1   A   
+CCF2. . . . . . . . . . .  B  ADDR  00D8H.2   A   
+CCF3. . . . . . . . . . .  B  ADDR  00D8H.3   A   
+CCF4. . . . . . . . . . .  B  ADDR  00D8H.4   A   
+CCON. . . . . . . . . . .  D  ADDR  00D8H     A   
+CF. . . . . . . . . . . .  B  ADDR  00D8H.7   A   
+CH. . . . . . . . . . . .  D  ADDR  00F9H     A   
+CKCON0. . . . . . . . . .  D  ADDR  008FH     A   
+CKCON1. . . . . . . . . .  D  ADDR  00AFH     A   
+CKRL. . . . . . . . . . .  D  ADDR  0097H     A   
+CKSEL . . . . . . . . . .  D  ADDR  0085H     A   
+CL. . . . . . . . . . . .  D  ADDR  00E9H     A   
+CMOD. . . . . . . . . . .  D  ADDR  00D9H     A   
+CP_RL2. . . . . . . . . .  B  ADDR  00C8H.0   A   
+CR. . . . . . . . . . . .  B  ADDR  00D8H.6   A   
+CY. . . . . . . . . . . .  B  ADDR  00D0H.7   A   
+DPH . . . . . . . . . . .  D  ADDR  0083H     A   
+DPL . . . . . . . . . . .  D  ADDR  0082H     A   
+EA. . . . . . . . . . . .  B  ADDR  00A8H.7   A   
+EC. . . . . . . . . . . .  B  ADDR  00A8H.6   A   
+EECON . . . . . . . . . .  D  ADDR  00D2H     A   
+ES. . . . . . . . . . . .  B  ADDR  00A8H.4   A   
+ET0 . . . . . . . . . . .  B  ADDR  00A8H.1   A   
+ET1 . . . . . . . . . . .  B  ADDR  00A8H.3   A   
+ET2 . . . . . . . . . . .  B  ADDR  00A8H.5   A   
+EX0 . . . . . . . . . . .  B  ADDR  00A8H.0   A   
+EX1 . . . . . . . . . . .  B  ADDR  00A8H.2   A   
+EXEN2 . . . . . . . . . .  B  ADDR  00C8H.3   A   
+EXF2. . . . . . . . . . .  B  ADDR  00C8H.6   A   
+F0. . . . . . . . . . . .  B  ADDR  00D0H.5   A   
+FCON. . . . . . . . . . .  D  ADDR  00D1H     A   
+IAP_BYTE. . . . . . . . .  D  ADDR  0000H     R   SEG=IAP_DATA
+IAP_CALL_ISP_DIRECT . . .  C  ADDR  0000H     R   SEG=IAP_CODE
+IAP_CODE. . . . . . . . .  C  SEG   0001DFH       REL=UNIT, ALN=BYTE
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    16
+
+IAP_DATA. . . . . . . . .  D  SEG   000001H       REL=UNIT, ALN=BYTE
+IAP_DRV . . . . . . . . .  -- ----  -------       
+IAP_ERASE_BLOCK . . . . .  C  ADDR  0053H     R   SEG=IAP_CODE
+IAP_ERASE_BOOT_VECTOR . .  C  ADDR  00B8H     R   SEG=IAP_CODE
+IAP_PROG_DATA_BYTE. . . .  C  ADDR  000CH     R   SEG=IAP_CODE
+IAP_PROGRAM_SECURITY_BITS  C  ADDR  0173H     R   SEG=IAP_CODE
+IAP_READ_BOOT_VECTOR. . .  C  ADDR  0093H     R   SEG=IAP_CODE
+IAP_READ_DEVICE_DATA. . .  C  ADDR  0030H     R   SEG=IAP_CODE
+IAP_READ_DEVICE_ID1 . . .  C  ADDR  0195H     R   SEG=IAP_CODE
+IAP_READ_DEVICE_ID2 . . .  C  ADDR  01BAH     R   SEG=IAP_CODE
+IAP_READ_MID. . . . . . .  C  ADDR  0071H     R   SEG=IAP_CODE
+IAP_READ_SECURITY_BITS. .  C  ADDR  014EH     R   SEG=IAP_CODE
+IAP_READ_STATUS_BYTE. . .  C  ADDR  0102H     R   SEG=IAP_CODE
+IE0 . . . . . . . . . . .  B  ADDR  0088H.1   A   
+IE1 . . . . . . . . . . .  B  ADDR  0088H.3   A   
+IEN0. . . . . . . . . . .  D  ADDR  00A8H     A   
+IEN1. . . . . . . . . . .  D  ADDR  00B1H     A   
+INT0. . . . . . . . . . .  B  ADDR  00B0H.2   A   
+INT1. . . . . . . . . . .  B  ADDR  00B0H.3   A   
+IPH0. . . . . . . . . . .  D  ADDR  00B7H     A   
+IPH1. . . . . . . . . . .  D  ADDR  00B3H     A   
+IPL0. . . . . . . . . . .  D  ADDR  00B8H     A   
+IPL1. . . . . . . . . . .  D  ADDR  00B2H     A   
+IT0 . . . . . . . . . . .  B  ADDR  0088H.0   A   
+IT1 . . . . . . . . . . .  B  ADDR  0088H.2   A   
+KBE . . . . . . . . . . .  D  ADDR  009DH     A   
+KBF . . . . . . . . . . .  D  ADDR  009EH     A   
+KBLS. . . . . . . . . . .  D  ADDR  009CH     A   
+OSCCON. . . . . . . . . .  D  ADDR  0086H     A   
+OV. . . . . . . . . . . .  B  ADDR  00D0H.2   A   
+P . . . . . . . . . . . .  B  ADDR  00D0H.0   A   
+P0. . . . . . . . . . . .  D  ADDR  0080H     A   
+P1. . . . . . . . . . . .  D  ADDR  0090H     A   
+P2. . . . . . . . . . . .  D  ADDR  00A0H     A   
+P3. . . . . . . . . . . .  D  ADDR  00B0H     A   
+P4. . . . . . . . . . . .  D  ADDR  00C0H     A   
+P5. . . . . . . . . . . .  D  ADDR  00E8H     A   
+PCON. . . . . . . . . . .  D  ADDR  0087H     A   
+PI2 . . . . . . . . . . .  D  ADDR  00F8H     A   
+PI2_1 . . . . . . . . . .  B  ADDR  00F8H.1   A   
+PI2_O . . . . . . . . . .  B  ADDR  00F8H.0   A   
+PPCL. . . . . . . . . . .  B  ADDR  00B8H.6   A   
+PSL . . . . . . . . . . .  B  ADDR  00B8H.4   A   
+PSW . . . . . . . . . . .  D  ADDR  00D0H     A   
+PT0L. . . . . . . . . . .  B  ADDR  00B8H.1   A   
+PT1L. . . . . . . . . . .  B  ADDR  00B8H.3   A   
+PT2L. . . . . . . . . . .  B  ADDR  00B8H.5   A   
+PX0L. . . . . . . . . . .  B  ADDR  00B8H.0   A   
+PX1L. . . . . . . . . . .  B  ADDR  00B8H.2   A   
+RB8 . . . . . . . . . . .  B  ADDR  0098H.2   A   
+RCAP2H. . . . . . . . . .  D  ADDR  00CBH     A   
+RCAP2L. . . . . . . . . .  D  ADDR  00CAH     A   
+RCLK. . . . . . . . . . .  B  ADDR  00C8H.5   A   
+RD. . . . . . . . . . . .  B  ADDR  00B0H.7   A   
+REN . . . . . . . . . . .  B  ADDR  0098H.4   A   
+RI. . . . . . . . . . . .  B  ADDR  0098H.0   A   
+RS0 . . . . . . . . . . .  B  ADDR  00D0H.3   A   
+RS1 . . . . . . . . . . .  B  ADDR  00D0H.4   A   
+RXD . . . . . . . . . . .  B  ADDR  00B0H.0   A   
+SADDR . . . . . . . . . .  D  ADDR  00A9H     A   
+SADEN . . . . . . . . . .  D  ADDR  00B9H     A   
+SBUF. . . . . . . . . . .  D  ADDR  0099H     A   
+SCON. . . . . . . . . . .  D  ADDR  0098H     A   
+SM0 . . . . . . . . . . .  B  ADDR  0098H.7   A   
+SM1 . . . . . . . . . . .  B  ADDR  0098H.6   A   
+SM2 . . . . . . . . . . .  B  ADDR  0098H.5   A   
+AX51 MACRO ASSEMBLER  In Application Programming driver                                     04/16/09 20:53:40 PAGE    17
+
+SP. . . . . . . . . . . .  D  ADDR  0081H     A   
+SPCON . . . . . . . . . .  D  ADDR  00C3H     A   
+SPDAT . . . . . . . . . .  D  ADDR  00C5H     A   
+SPSTA . . . . . . . . . .  D  ADDR  00C4H     A   
+SSADR . . . . . . . . . .  D  ADDR  0096H     A   
+SSCON . . . . . . . . . .  D  ADDR  0093H     A   
+SSCS. . . . . . . . . . .  D  ADDR  0094H     A   
+SSDAT . . . . . . . . . .  D  ADDR  0095H     A   
+T0. . . . . . . . . . . .  B  ADDR  00B0H.4   A   
+T1. . . . . . . . . . . .  B  ADDR  00B0H.5   A   
+T2CON . . . . . . . . . .  D  ADDR  00C8H     A   
+T2MOD . . . . . . . . . .  D  ADDR  00C9H     A   
+TB8 . . . . . . . . . . .  B  ADDR  0098H.3   A   
+TCLK. . . . . . . . . . .  B  ADDR  00C8H.4   A   
+TCON. . . . . . . . . . .  D  ADDR  0088H     A   
+TF0 . . . . . . . . . . .  B  ADDR  0088H.5   A   
+TF1 . . . . . . . . . . .  B  ADDR  0088H.7   A   
+TF2 . . . . . . . . . . .  B  ADDR  00C8H.7   A   
+TH0 . . . . . . . . . . .  D  ADDR  008CH     A   
+TH1 . . . . . . . . . . .  D  ADDR  008DH     A   
+TH2 . . . . . . . . . . .  D  ADDR  00CDH     A   
+TI. . . . . . . . . . . .  B  ADDR  0098H.1   A   
+TL0 . . . . . . . . . . .  D  ADDR  008AH     A   
+TL1 . . . . . . . . . . .  D  ADDR  008BH     A   
+TL2 . . . . . . . . . . .  D  ADDR  00CCH     A   
+TMOD. . . . . . . . . . .  D  ADDR  0089H     A   
+TR0 . . . . . . . . . . .  B  ADDR  0088H.4   A   
+TR1 . . . . . . . . . . .  B  ADDR  0088H.6   A   
+TR2 . . . . . . . . . . .  B  ADDR  00C8H.2   A   
+TXD . . . . . . . . . . .  B  ADDR  00B0H.1   A   
+WDTPRG. . . . . . . . . .  D  ADDR  00A7H     A   
+WDTRST. . . . . . . . . .  D  ADDR  00A6H     A   
+WR. . . . . . . . . . . .  B  ADDR  00B0H.6   A   
+
+
+REGISTER BANK(S) USED: 0 
+
+
+ASSEMBLY COMPLETE.  0 WARNING(S), 0 ERROR(S).

@@ -1,0 +1,351 @@
+C51 COMPILER V8.05a   EVENT                                                                04/16/2009 20:53:44 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE EVENT
+OBJECT MODULE PLACED IN .\obj\event.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\event.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\event.lst) O
+                    -BJECT(.\obj\event.obj)
+
+line level    source
+
+   1          
+   2              /////////////////////////////////////////////////////////////////////////////
+   3              // +---------------------------------------------------------------------+ //
+   4              // |                              Event driver                           | //
+   5              // |                     ------------------------------                  | //
+   6              // |                               Verze 1.05                            | //
+   7              // |                                                                     | //
+   8              // |                         Copyright Thomas Hoodger                    | //
+   9              // |                             (c) 2005-2009                           | //
+  10              // |                 thomas[point]hoodger[at]gmail[point]com             | //
+  11              // |                                                                     | //
+  12              // +---------------------------------------------------------------------+ //
+  13              // |                                                                     | //
+  14              // |  Uklada udalosti do bufferu udalosti, pokud je v bufferu udalost,   | //
+  15              // |  nastavi priznak, priznak je zachycen v hlavni smycce a udalost     | //
+  16              // |  nasledne vyzvednuta                                                | //
+  17              // |                                                                     | //
+  18              // +---------------------------------------------------------------------+ //
+  19              //                                                                         //
+  20              //  ---------------------------------------------------------------------  //
+  21              //    Version history:                                                     //
+  22              //                                                                         //
+  23              //       1.01         Zakladni verze s jednorozmernym bufferem udalosti    //
+  24              //                                                                         //
+  25              //       1.02         Upraven buffer pro 2 hodnoty (udalost, hodnota)      //
+  26              //                                                                         //
+  27              //       1.03         Upraveno nacitani udalosti z bufferu, pridan flag    //
+  28              //                    pripravene udalosti v promennych                     //
+  29              //                                                                         //
+  30              //       1.04         Drobne upravy                                        //
+  31              //                                                                         //
+  32              //       1.05         Upravena struktura udalosti - hodnota udalosti       //
+  33              //                    rozsirena na int, udalost zpracovavana jako          //
+  34              //                    struktura, pristup k hornimu i dolnimu byte hodnoty  //
+  35              //                    prostrednictvim unionu                               //
+  36              //                                                                         //
+  37              //  ---------------------------------------------------------------------  //
+  38              //                                                                         //
+  39              // ----------------------------------------------------------------------- //
+  40              /////////////////////////////////////////////////////////////////////////////
+  41          #pragma LIST
+  42          #pragma PAGELENGTH(30000);
+  43          #pragma LINES
+  44          
+  45          #define uchar unsigned char
+  46          #define uint unsigned int
+  47          
+  48          #include "target.def"
+  49          #include "event.def"
+  50          #include "my_types.h"
+  51          
+  52          //------------------------------------------------------------------------------
+  53          typedef struct {
+  54                  uchar          id;
+  55                  t_double_byte  value;
+  56                               
+  57          } t_event;
+  58          
+  59          //------------------------------------------------------------------------------
+  60          t_event TARGET_XMEM event[MAX_EVENTS_COUNT];            // buffer udalosti
+  61          
+  62          uchar TARGET_MMEM event_in_buffer;                      // pocet udalosti v bufferu
+  63          uchar TARGET_MMEM event_index_write;                    // index pro zapis udalosti
+  64          uchar TARGET_MMEM event_index_read;                     // index pro cteni udalosti
+  65          
+  66          uchar TARGET_MMEM event_id;                             // globalni promenna pro predani udalosti
+  67          uchar TARGET_MMEM event_value;                          // globalni promenna pro predani hodnoty udalosti
+  68          
+  69          bit   event_overflow;                                   // flag prepisu udalosti
+  70          bit   event_ready;                                      // flag nactene udalosti z bufferu
+  71          
+  72          // -------------------------------------------------------------------------------------- 
+  73          
+  74          // +-------------------------------------+
+  75          // |   Odeslani udalosti do bufferu      |
+  76          // +-------------------------------------+
+  77          // Ulozi udalost do bufferu udalosti a upravi ukazatele
+  78          void event_send(uchar event_id, uint event_value)
+  79          {
+  80   1          if(event_in_buffer < MAX_EVENTS_COUNT)                          // Pokud neni buffer udalosti plny
+  81   1          {
+  82   2              event_index_write %= MAX_EVENTS_COUNT;                      // Pretoc index, je-li na max.
+  83   2              event[event_index_write].id = event_id;
+  84   2              event[event_index_write].value.word = event_value;          // zapis udalost a hodnotu udalosti do
+             - bufferu
+  85   2              event_index_write++;                                        // Posun index
+  86   2              event_in_buffer++;                                          // Zvys pocet udalosti v bufferu
+  87   2          }
+  88   1          else
+  89   1          {
+  90   2              event_overflow=1;                                           // Nastav flag preteceni bufferu
+  91   2              //interface_printf(EVENT_LOG, "EVENT: !!! EVENT ID:%i MISSED !!!\n", (int) event_id);
+  92   2          }
+  93   1      }
+  94          
+  95          
+  96          // +--------------------------------------------------------+
+  97          // |   Proces nacteni udalosti do globalnich promennych     |
+  98          // +--------------------------------------------------------+
+  99          // Nacte nejstarsi udalost do globalnich promennych,
+ 100          // upravi ukazatele v bufferu
+ 101          void event_proc()
+ 102          {
+ 103   1          t_event evnt;
+ 104   1      
+ 105   1          if(event_in_buffer)                         // pokud je nejaka udalost v bufferu
+ 106   1          {
+ 107   2              event_index_read %= MAX_EVENTS_COUNT;   // pretoc index, je-li na max.
+ 108   2              evnt = event[event_index_read];         // nacti udalost z bufferu
+ 109   2              event[event_index_read].id = 0;         // vymaz id udalosti v bufferu
+ 110   2              event[event_index_read].value.word = 0; // vymaz hodnotu udalosti v bufferu
+ 111   2              event_index_read++;                     // posun index
+ 112   2              event_in_buffer--;                      // dekrementuj pocet udalosti v bufferu
+ 113   2      
+ 114   2              event_ready = 1;                        // nastav flag cekajici udalosti, nactene z bufferu
+ 115   2              
+ 116   2              event_id = evnt.id;                     // nacti id udalosti
+ 117   2              event_value = evnt.value.word;          // nacti hodnotu udalosti
+ 118   2          }
+ 119   1          else
+ 120   1          {
+ 121   2              if(event_ready)
+ 122   2              {
+ 123   3                  event_ready = 0;
+ 124   3                  //event_send(EVENT_EVENT_BUFFER_FREE, 0);
+ 125   3              }
+ 126   2          }
+ 127   1      }
+ 128          
+ 129          // +-------------------------------------+
+ 130          // |   Init promennych                   |
+ 131          // +-------------------------------------+
+ 132          void event_init()
+ 133          {
+ 134   1          event_in_buffer = 0;
+ 135   1          event_index_write = 0;
+ 136   1          event_index_read = 0;
+ 137   1          event_overflow = 0;
+ 138   1          event_ready = 0;
+ 139   1          event_id = 0;                                 // globalni promenna pro predani udalosti
+ 140   1          event_value = 0;                              // globalni promenna pro predani hodnoty udalosti
+ 141   1      }
+ 142          
+ 143          
+ 144          
+C51 COMPILER V8.05a   EVENT                                                                04/16/2009 20:53:44 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _event_send (BEGIN)
+                                           ; SOURCE LINE # 78
+;---- Variable 'event_value' assigned to Register 'R4/R5' ----
+;---- Variable 'event_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 79
+                                           ; SOURCE LINE # 80
+0000 7800        R     MOV     R0,#LOW event_in_buffer
+0002 E6                MOV     A,@R0
+0003 C3                CLR     C
+0004 940A              SUBB    A,#0AH
+0006 5030              JNC     ?C0001
+                                           ; SOURCE LINE # 81
+                                           ; SOURCE LINE # 82
+0008 18                DEC     R0
+0009 E6                MOV     A,@R0
+000A 75F00A            MOV     B,#0AH
+000D 84                DIV     AB
+000E AEF0              MOV     R6,B
+0010 EE                MOV     A,R6
+0011 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 83
+0012 75F003            MOV     B,#03H
+0015 A4                MUL     AB
+0016 2400        R     ADD     A,#LOW event
+0018 F582              MOV     DPL,A
+001A E4                CLR     A
+001B 3400        R     ADDC    A,#HIGH event
+001D F583              MOV     DPH,A
+001F EF                MOV     A,R7
+0020 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 84
+0021 EE                MOV     A,R6
+0022 75F003            MOV     B,#03H
+0025 A4                MUL     AB
+0026 2400        R     ADD     A,#LOW event+01H
+0028 F582              MOV     DPL,A
+002A E4                CLR     A
+002B 3400        R     ADDC    A,#HIGH event+01H
+002D F583              MOV     DPH,A
+002F EC                MOV     A,R4
+0030 F0                MOVX    @DPTR,A
+0031 A3                INC     DPTR
+0032 ED                MOV     A,R5
+0033 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 85
+0034 06                INC     @R0
+                                           ; SOURCE LINE # 86
+0035 08                INC     R0
+0036 06                INC     @R0
+                                           ; SOURCE LINE # 87
+0037 22                RET     
+0038         ?C0001:
+                                           ; SOURCE LINE # 89
+                                           ; SOURCE LINE # 90
+0038 D200        R     SETB    event_overflow
+                                           ; SOURCE LINE # 92
+                                           ; SOURCE LINE # 93
+003A         ?C0003:
+003A 22                RET     
+             ; FUNCTION _event_send (END)
+
+             ; FUNCTION event_proc (BEGIN)
+                                           ; SOURCE LINE # 101
+                                           ; SOURCE LINE # 102
+                                           ; SOURCE LINE # 105
+0000 7800        R     MOV     R0,#LOW event_in_buffer
+0002 E6                MOV     A,@R0
+0003 6058              JZ      ?C0004
+                                           ; SOURCE LINE # 106
+                                           ; SOURCE LINE # 107
+0005 7800        R     MOV     R0,#LOW event_index_read
+0007 E6                MOV     A,@R0
+0008 75F00A            MOV     B,#0AH
+000B 84                DIV     AB
+000C A6F0              MOV     @R0,B
+                                           ; SOURCE LINE # 108
+000E E6                MOV     A,@R0
+000F 75F003            MOV     B,#03H
+0012 A4                MUL     AB
+0013 2400        R     ADD     A,#LOW event
+0015 F9                MOV     R1,A
+0016 7400        R     MOV     A,#HIGH event
+0018 35F0              ADDC    A,B
+001A FA                MOV     R2,A
+001B 7B01              MOV     R3,#01H
+001D 7800        R     MOV     R0,#LOW evnt
+001F 7C00        R     MOV     R4,#HIGH evnt
+0021 7D00              MOV     R5,#00H
+0023 7E00              MOV     R6,#00H
+0025 7F03              MOV     R7,#03H
+0027 120000      E     LCALL   ?C?COPY
+                                           ; SOURCE LINE # 109
+002A 7800        R     MOV     R0,#LOW event_index_read
+002C E6                MOV     A,@R0
+002D FF                MOV     R7,A
+002E 75F003            MOV     B,#03H
+0031 A4                MUL     AB
+0032 2400        R     ADD     A,#LOW event
+0034 F582              MOV     DPL,A
+0036 E4                CLR     A
+0037 3400        R     ADDC    A,#HIGH event
+0039 F583              MOV     DPH,A
+003B E4                CLR     A
+003C F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 110
+003D EF                MOV     A,R7
+003E 75F003            MOV     B,#03H
+0041 A4                MUL     AB
+0042 2400        R     ADD     A,#LOW event+01H
+0044 F582              MOV     DPL,A
+0046 E4                CLR     A
+0047 3400        R     ADDC    A,#HIGH event+01H
+0049 F583              MOV     DPH,A
+004B E4                CLR     A
+004C F0                MOVX    @DPTR,A
+004D A3                INC     DPTR
+004E F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 111
+004F 06                INC     @R0
+                                           ; SOURCE LINE # 112
+0050 7800        R     MOV     R0,#LOW event_in_buffer
+0052 16                DEC     @R0
+                                           ; SOURCE LINE # 114
+0053 D200        R     SETB    event_ready
+                                           ; SOURCE LINE # 116
+0055 08                INC     R0
+0056 A600        R     MOV     @R0,evnt
+                                           ; SOURCE LINE # 117
+0058 7800        R     MOV     R0,#LOW event_value
+005A A600        R     MOV     @R0,evnt+02H
+                                           ; SOURCE LINE # 118
+005C 22                RET     
+005D         ?C0004:
+                                           ; SOURCE LINE # 120
+                                           ; SOURCE LINE # 121
+005D 300002            JNB     event_ready,?C0007
+                                           ; SOURCE LINE # 122
+                                           ; SOURCE LINE # 123
+0060 C200        R     CLR     event_ready
+                                           ; SOURCE LINE # 125
+                                           ; SOURCE LINE # 126
+                                           ; SOURCE LINE # 127
+0062         ?C0007:
+0062 22                RET     
+             ; FUNCTION event_proc (END)
+
+             ; FUNCTION event_init (BEGIN)
+                                           ; SOURCE LINE # 132
+                                           ; SOURCE LINE # 133
+                                           ; SOURCE LINE # 134
+0000 E4                CLR     A
+0001 7800        R     MOV     R0,#LOW event_in_buffer
+0003 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 135
+0004 18                DEC     R0
+0005 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 136
+0006 7800        R     MOV     R0,#LOW event_index_read
+0008 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 137
+0009 C200        R     CLR     event_overflow
+                                           ; SOURCE LINE # 138
+000B C200        R     CLR     event_ready
+                                           ; SOURCE LINE # 139
+000D 7800        R     MOV     R0,#LOW event_id
+000F F6                MOV     @R0,A
+                                           ; SOURCE LINE # 140
+0010 7800        R     MOV     R0,#LOW event_value
+0012 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 141
+0013 22                RET     
+             ; FUNCTION event_init (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    178    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     30    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       3
+   IDATA SIZE       =      5    ----
+   BIT SIZE         =      2    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

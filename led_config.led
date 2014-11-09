@@ -1,0 +1,38 @@
+[Version]
+Version=0.1
+[Device:0]
+Typ:=LG3360-KN (LED 3mm)
+Pos:=a, 33, 1b, 44
+Address1:=P0_0
+nMask1:=207
+val1:=80
+Type1:=1
+OK1:=1
+SFR1:=1
+VTREG1:=0
+MASK1:=1
+Length1:=0
+[Device:1]
+Typ:=LG3360-KN (LED 3mm)
+Pos:=a, 65, 1b, 76
+Address1:=P0_2
+nMask1:=207
+val1:=80
+Type1:=1
+OK1:=1
+SFR1:=1
+VTREG1:=0
+MASK1:=4
+Length1:=0
+[Device:2]
+Typ:=LG3360-KN (LED 3mm)
+Pos:=a, 4c, 1b, 5d
+Address1:=P0_1
+nMask1:=207
+val1:=80
+Type1:=1
+OK1:=1
+SFR1:=1
+VTREG1:=0
+MASK1:=2
+Length1:=0

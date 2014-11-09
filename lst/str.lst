@@ -1,0 +1,288 @@
+C51 COMPILER V8.05a   STR                                                                  04/16/2009 20:53:44 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE STR
+OBJECT MODULE PLACED IN .\obj\str.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\str.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\str.lst) OBJEC
+                    -T(.\obj\str.obj)
+
+line level    source
+
+   1          /////////////////////////////////////////////////////////////////////////////
+   2          // +---------------------------------------------------------------------+ //
+   3          // |                             String utils                            | //
+   4          // |                   --------------------------------                  | //
+   5          // |                             Version 1.02                            | //
+   6          // |                                                                     | //
+   7          // |                         Copyright Tomas Hujer                       | //
+   8          // |                             (c) 2005-2007                           | //
+   9          // |                      thomas.hoodger(at)gmail.com                    | //
+  10          // +---------------------------------------------------------------------+ //
+  11          //                                                                         //
+  12          //  Version history                                                        //
+  13          //                                                                         //
+  14          //                     ----------------------------------------------      //
+  15          //        1.02           Pridana funkce pro porovnani retezcu              //
+  16          //                     ----------------------------------------------      //
+  17          //                                                                         //
+  18          // ----------------------------------------------------------------------- //
+  19          /////////////////////////////////////////////////////////////////////////////
+  20          #pragma LIST
+  21          #pragma PAGELENGTH(30000);
+  22          #pragma LINES
+  23          
+  24          #define uchar unsigned char
+  25          #define uint  unsigned int
+  26          // ---------------------------------------------------------------------------
+  27          
+  28          
+  29          
+  30          // +------------------------------------------------------------------------+
+  31          // |                       Konverze znaku na velky                          |
+  32          // +------------------------------------------------------------------------+
+  33          // | Vrati velke pismeno znaku ch                                           |
+  34          // +------------------------------------------------------------------------+
+  35          uchar str_up_char(uchar ch)
+  36          {
+  37   1          if((ch>='a') &&
+  38   1           (ch<='z'))
+  39   1              return(ch & (255-32));
+  40   1          else
+  41   1              return(ch);
+  42   1      }
+  43          
+  44          
+  45          // +------------------------------------------------------------------------+
+  46          // |                           Vymazani bufferu                             |
+  47          // +------------------------------------------------------------------------+
+  48          // | Vynuluje pocet byte Bytes na ukazateli *buf                            |
+  49          // +------------------------------------------------------------------------+
+  50          void str_reset_buffer(uchar *buf, uint bytes)
+  51          {
+  52   1          uchar i;
+  53   1          
+  54   1          for(i=0; i < bytes; i++)
+  55   1              buf[i]=0;
+  56   1      }
+  57          
+  58          
+  59          // +------------------------------------------------------------------------+
+  60          // |                       Detekce znaku - cislice                          |
+  61          // +------------------------------------------------------------------------+
+  62          // | Je-li znak cislice vrati 1                                             |
+  63          // +------------------------------------------------------------------------+
+  64          uchar str_is_num(uchar Char)
+  65          {
+  66   1          if((Char >= '0') &&
+  67   1             (Char <= '9'))
+  68   1              return(1);
+  69   1          else
+  70   1              return(0);
+  71   1      }
+  72          
+  73          
+  74          // +------------------------------------------------------------------------+
+  75          // |                        Porovnani retezce                               |
+  76          // +------------------------------------------------------------------------+
+  77          // | Pokud si Bytes znaku v retezcich Ptr1 a Ptr2 odpovida vrati 1          |
+  78          // +------------------------------------------------------------------------+
+  79          bit str_cmp(uchar *ptr1, uchar *ptr2)
+  80          { 
+  81   1          uchar i=0;
+  82   1          bit   out=0;
+  83   1      
+  84   1          //while(ptr1[i] && ptr2[i])
+  85   1          while(ptr2[i])
+  86   1          {
+  87   2              out=1;
+  88   2              if(str_up_char(ptr1[i]) != str_up_char(ptr2[i]))
+  89   2              {
+  90   3                  out=0;
+  91   3                  break;
+  92   3              }
+  93   2              i++;
+  94   2          }
+  95   1          return(out);
+  96   1      }
+  97          
+  98          
+  99          
+ 100          // +------------------------------------------------------------------------+
+ 101          // |                        Detekce hex cisla                               |
+ 102          // +------------------------------------------------------------------------+
+ 103          // | Je-li byte hex cislo, vraci 1                                          |
+ 104          // +------------------------------------------------------------------------+
+ 105          /*
+ 106          bit is_hex(char byte)
+ 107          {
+ 108              if(((up_char(byte) >= 'A') && (up_char(byte) <='F')) || ((byte >= '0') && (byte <= '9')))
+ 109                  return(1);
+ 110              else
+ 111                  return(0);        
+ 112          }
+ 113          */
+ 114          
+C51 COMPILER V8.05a   STR                                                                  04/16/2009 20:53:44 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _str_up_char (BEGIN)
+                                           ; SOURCE LINE # 35
+;---- Variable 'ch' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 36
+                                           ; SOURCE LINE # 37
+0000 EF                MOV     A,R7
+0001 C3                CLR     C
+0002 9461              SUBB    A,#061H
+0004 400B              JC      ?C0001
+0006 EF                MOV     A,R7
+0007 D3                SETB    C
+0008 947A              SUBB    A,#07AH
+000A 5005              JNC     ?C0001
+                                           ; SOURCE LINE # 39
+000C EF                MOV     A,R7
+000D 54DF              ANL     A,#0DFH
+000F FF                MOV     R7,A
+0010 22                RET     
+0011         ?C0001:
+                                           ; SOURCE LINE # 41
+                                           ; SOURCE LINE # 42
+0011         ?C0002:
+0011 22                RET     
+             ; FUNCTION _str_up_char (END)
+
+             ; FUNCTION _str_reset_buffer (BEGIN)
+                                           ; SOURCE LINE # 50
+0000 8B00        R     MOV     buf,R3
+0002 8A00        R     MOV     buf+01H,R2
+0004 8900        R     MOV     buf+02H,R1
+0006 8C00        R     MOV     bytes,R4
+0008 8D00        R     MOV     bytes+01H,R5
+                                           ; SOURCE LINE # 51
+                                           ; SOURCE LINE # 54
+;---- Variable 'i' assigned to Register 'R7' ----
+000A E4                CLR     A
+000B FF                MOV     R7,A
+000C         ?C0004:
+000C EF                MOV     A,R7
+000D C3                CLR     C
+000E 9500        R     SUBB    A,bytes+01H
+0010 E4                CLR     A
+0011 9500        R     SUBB    A,bytes
+0013 5012              JNC     ?C0007
+                                           ; SOURCE LINE # 55
+0015 AB00        R     MOV     R3,buf
+0017 AA00        R     MOV     R2,buf+01H
+0019 A900        R     MOV     R1,buf+02H
+001B 8F82              MOV     DPL,R7
+001D 758300            MOV     DPH,#00H
+0020 E4                CLR     A
+0021 120000      E     LCALL   ?C?CSTOPTR
+0024 0F                INC     R7
+0025 80E5              SJMP    ?C0004
+                                           ; SOURCE LINE # 56
+0027         ?C0007:
+0027 22                RET     
+             ; FUNCTION _str_reset_buffer (END)
+
+             ; FUNCTION _str_is_num (BEGIN)
+                                           ; SOURCE LINE # 64
+;---- Variable 'Char' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 65
+                                           ; SOURCE LINE # 66
+0000 EF                MOV     A,R7
+0001 C3                CLR     C
+0002 9430              SUBB    A,#030H
+0004 4009              JC      ?C0008
+0006 EF                MOV     A,R7
+0007 D3                SETB    C
+0008 9439              SUBB    A,#039H
+000A 5003              JNC     ?C0008
+                                           ; SOURCE LINE # 68
+000C 7F01              MOV     R7,#01H
+000E 22                RET     
+000F         ?C0008:
+                                           ; SOURCE LINE # 70
+000F 7F00              MOV     R7,#00H
+                                           ; SOURCE LINE # 71
+0011         ?C0009:
+0011 22                RET     
+             ; FUNCTION _str_is_num (END)
+
+             ; FUNCTION _str_cmp (BEGIN)
+                                           ; SOURCE LINE # 79
+0000 8B00        R     MOV     ptr1,R3
+0002 8A00        R     MOV     ptr1+01H,R2
+0004 8900        R     MOV     ptr1+02H,R1
+                                           ; SOURCE LINE # 80
+                                           ; SOURCE LINE # 81
+;---- Variable 'i' assigned to Register 'R6' ----
+0006 E4                CLR     A
+0007 FE                MOV     R6,A
+                                           ; SOURCE LINE # 82
+0008 C200        R     CLR     out
+000A         ?C0011:
+                                           ; SOURCE LINE # 85
+000A AB00        R     MOV     R3,ptr2
+000C AA00        R     MOV     R2,ptr2+01H
+000E A900        R     MOV     R1,ptr2+02H
+0010 8E82              MOV     DPL,R6
+0012 758300            MOV     DPH,#00H
+0015 120000      E     LCALL   ?C?CLDOPTR
+0018 FF                MOV     R7,A
+0019 6024              JZ      ?C0012
+                                           ; SOURCE LINE # 86
+                                           ; SOURCE LINE # 87
+001B D200        R     SETB    out
+                                           ; SOURCE LINE # 88
+001D 120000      R     LCALL   _str_up_char
+0020 AD07              MOV     R5,AR7
+0022 AB00        R     MOV     R3,ptr1
+0024 AA00        R     MOV     R2,ptr1+01H
+0026 A900        R     MOV     R1,ptr1+02H
+0028 8E82              MOV     DPL,R6
+002A 758300            MOV     DPH,#00H
+002D 120000      E     LCALL   ?C?CLDOPTR
+0030 FF                MOV     R7,A
+0031 120000      R     LCALL   _str_up_char
+0034 EF                MOV     A,R7
+0035 6D                XRL     A,R5
+0036 6004              JZ      ?C0013
+                                           ; SOURCE LINE # 89
+                                           ; SOURCE LINE # 90
+0038 C200        R     CLR     out
+                                           ; SOURCE LINE # 91
+003A 8003              SJMP    ?C0012
+                                           ; SOURCE LINE # 92
+003C         ?C0013:
+                                           ; SOURCE LINE # 93
+003C 0E                INC     R6
+                                           ; SOURCE LINE # 94
+003D 80CB              SJMP    ?C0011
+003F         ?C0012:
+                                           ; SOURCE LINE # 95
+003F A200        R     MOV     C,out
+                                           ; SOURCE LINE # 96
+0041         ?C0014:
+0041 22                RET     
+             ; FUNCTION _str_cmp (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    142    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      11
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

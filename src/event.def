@@ -1,0 +1,25 @@
+
+#ifndef __EVENT_DEF__
+    #define __EVENT_DEF__
+
+    #define MAX_EVENTS_COUNT    10
+
+
+typedef enum { 
+
+            EVENT_STARTUP = 1,                  // spusteni systemu
+
+            EVENT_PIR_ALARM_ON,                 // vyvolan alarm PIR cidlem
+            EVENT_PIR_ALARM_OFF,                // konec alarmu vyvolaneho PIR cidlem
+
+            EVENT_CMP1_STATE_CHANGE,            // zmena stavu komparatoru 1
+            EVENT_CMP2_STATE_CHANGE,            // zmena stavu komparatoru 2
+
+            EVENT_TSENSE_FINISH,                // dokonceno mereni teploty
+            EVENT_TSENSE_ERROR,                 // chyba pri mereni teploty
+
+            EVENT_NEVER,                        // ladici udalost, nikdy neni vykonana (uzitecne pro nepouzite funkce)
+    
+} t_event_id;
+    
+#endif

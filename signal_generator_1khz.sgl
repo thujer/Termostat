@@ -1,0 +1,21 @@
+[Version]
+Version=0.1
+[Signal Info_0]
+Name=INT0
+Mask=207
+Address=b0
+Datatype=1
+Ok=1
+SFR=1
+VTREG=0
+BitMask=4
+Length=0
+Wafeform=0
+Frequency=1.000000
+FreqMul=1
+Offset=0.000000
+Amplitude=5.000000
+tiT=0.500000
+StartOfPeriod=0.000000
+HystUp=2.400000
+HystDown=0.400000

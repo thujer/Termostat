@@ -1,0 +1,282 @@
+
+  /////////////////////////////////////////////////////////////////////////////
+  // +---------------------------------------------------------------------+ //
+  // |                           Basic enviroment                          | //
+  // |           with command detection, events, timers and more ...       |
+  // |          -----------------------------------------------------      | //
+#define                           VERSION "1.01a"                           
+#define                           BUILD "090411"                           
+  // |                                                                     | //
+  // |                           Thomas Hoodger                            | //
+  // |                       Copyright (c) 2008-2009                       | //
+  // |                    thomas.hoodger(at)gmail.com                      | //
+  // +---------------------------------------------------------------------+ //
+  /////////////////////////////////////////////////////////////////////////////
+  // ----------------------------------------------------------------------- //
+  //                - Pohybovy sensor             					         //
+  //            	- soumrakovym spinacem,			                         //
+  //            	- plynule rozsveceni a zhasinanim						 //
+  //            	- komunikacni rozhrani                                   //
+  // ----------------------------------------------------------------------- //
+  /////////////////////////////////////////////////////////////////////////////
+  // ----------------------------------------------------------------------- //
+  //  Version history:                                                       //
+  //     1.01       - sestaveni zakladni aplikace s novymi drivery           //
+  //                - portace pro AT89C51ED2                                  //
+  //																		 //
+  // ----------------------------------------------------------------------- //
+  /////////////////////////////////////////////////////////////////////////////
+
+#include "target.h"
+#include "target.def"
+#include TARGET_SFR_HEADER
+#include <stdio.h>          // Standard I/O routines
+#include "cmd.h"            // command detector
+#include "cmd.def"          // commands table
+#include "event.h"          // driver udalosti
+#include "event.def"        // definice udalosti
+#include "iap.h"            // In Application Programming
+#include "isp.h"            // ISP mode access security
+#include "led.h"            // LED driver
+#include "pin.h"            // Pin utils
+#include "stdout.h"         // Standard output forwards
+#include "str.h"            // String tools
+#include "tsense.h"         // Temperature sensor
+#include "tsense.def"         // Temperature sensor
+#include "timers.h"         // Timer 0 services init
+#include "uart.h"		    // Uart driver
+//------------------------------------------------------------------------------------------------------------
+
+#define MAIN_TERMINAL_PARBUF_SIZE 20
+
+//------------------------------------------------------------------------------------------------------------
+uchar TARGET_XMEM  main_terminal_parbuf[MAIN_TERMINAL_PARBUF_SIZE];       // buffer parametru pro SWCOM
+
+bit main_measure_loop = 0;
+bit main_measure_request = 0;
+//------------------------------------------------------------------------------------------------------------
+
+
+
+void main_uart_command(uchar command_id)
+{
+    char pin_id;
+    char pin_state;
+
+    switch(command_id)
+    {
+        case CMD_HELP:
+                cmd_command_list(CMD_SESSION_ID_TERMINAL);
+                break;
+
+        case CMD_BOOT:  
+                printf(BR"Call ISP recovery..."); 
+                isp_recovery();
+                printf("RET"DBR);
+                break;
+
+        case CMD_CALL_ISP:
+                printf(BR"Call ISP..."); 
+                isp_call_bootloader();
+                printf("RET"DBR);
+                break;
+        
+        case CMD_P0:
+                //while(~printf_ready); 
+
+                if(cmd_par_count(CMD_SESSION_ID_TERMINAL))
+                {
+                    if(cmd_par_count(CMD_SESSION_ID_TERMINAL) > 1)
+                    {
+                        pin_id    = cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1);          // get pin id from parameter
+                        pin_state = cmd_getparnum(CMD_SESSION_ID_TERMINAL, 1, 1);          // get pin state from parameter
+
+                        pin_change(PORT_ID_P0, pin_id, pin_state);
+                    }
+
+                    printf("P0.%i == %i"DBR, cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1), (int) pin_get_state(PORT_ID_P0, cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1)));
+                }
+                else
+                    printf("P0: %i"DBR, (int) P0); 
+                //printf_ready = 1;    
+                break;
+
+        case CMD_P1:    
+                //while(~printf_ready); 
+                if(cmd_par_count(CMD_SESSION_ID_TERMINAL))
+                {
+                    if(cmd_par_count(CMD_SESSION_ID_TERMINAL) > 1)
+                    {
+                        pin_id    = cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1);          // get pin id from parameter
+                        pin_state = cmd_getparnum(CMD_SESSION_ID_TERMINAL, 1, 1);          // get pin state from parameter
+
+                        pin_change(PORT_ID_P1, pin_id, pin_state);
+                    }
+
+                    printf("P1.%i == %i"DBR, cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1), (int) pin_get_state(PORT_ID_P1, cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 1)));
+                }
+                else
+                    printf("P1: %i"DBR, (int) P1); 
+
+                //printf_ready = 1;    
+                break;
+
+        case CMD_INFINITE_LOOP:
+                printf("Going into infinite loop, press ESC to break it out..."); 
+                while(1)
+                {
+                    uart_proc();
+
+                    if(uart_ribuf == 27)
+                        break;
+                }
+                printf(BR"BREAK"DBR);
+                break;
+
+        case CMD_TSENSE:
+                main_measure_loop = ~main_measure_loop;
+                printf(BR"Temperature loop %s..."DBR, main_measure_loop?"started":"stopped");
+
+                if(main_measure_loop)
+                    tsense_add_task(0, EVENT_TSENSE_FINISH);
+                break;
+    }
+}
+
+
+//-------------------------------------//
+//        Event scheduler              //
+//-------------------------------------//
+void main_event_proc(uchar event_id, uint event_value)
+{
+    #if TSENSE_COMPILE_COMPENSATION == 1
+    uchar i;
+    #endif
+
+    switch(event_id)
+    {
+        case EVENT_STARTUP:
+                break;
+
+        case EVENT_TSENSE_FINISH:
+                printf("IntrCall: %i, ", (uint) tsense_interrupt_counter);
+                printf("TH: %u, ", (uint) tsense_timer_value_H);
+                printf("TL: %u, ", (uint) tsense_timer_value_L);
+                printf("Temp: %f"BR, tsense_temperature);
+
+                #if TSENSE_COMPILE_COMPENSATION == 1
+                printf(BR"---------------------------------------"BR);
+                printf(BR"Realtime TimerH mins: ");
+                for(i=TSENSE_PERIODS_SKIPPED; i; i--) 
+                    printf(" %i ", tsense_timer_H_value_min[i]);
+                
+                printf(BR"Realtime TimerH maxs: ");
+                for(i=TSENSE_PERIODS_SKIPPED; i; i--) 
+                    printf(" %i ", tsense_timer_H_value_max[i]);
+                
+                printf(BR"Realtime TimerL mins: ");
+                for(i=TSENSE_PERIODS_SKIPPED; i; i--) 
+                    printf(" %i ", tsense_timer_L_value_min[i]);
+                
+                printf(BR"Realtime TimerL maxs: ");
+                for(i=TSENSE_PERIODS_SKIPPED; i; i--) 
+                    printf(" %i ", tsense_timer_L_value_max[i]);
+               
+                #endif
+
+                #ifdef TSENSE_DEBUG_LOG
+                printf("---------------------------------------"BR);
+                for(i=0; i<tsense_timer_H_array_ix; i++)
+                {
+                    printf("%u, %u"BR, tsense_timer_H_array[i], tsense_timer_L_array[i]);
+                }
+                #endif
+
+                if(main_measure_loop)
+                    main_measure_request = 1;
+
+                //PCON |= 1;
+
+                break;
+
+        case EVENT_TSENSE_ERROR:
+                main_measure_loop = 0;
+                main_measure_request = 0;
+                printf(BR"Temperature measure error!"DBR);
+                break;
+
+        case EVENT_NEVER:
+                if(event_value);
+                isp_found();
+                str_cmp(&event_id, &event_id);
+                led_blink(0);
+                break;
+    }
+}
+
+
+
+//-------------------------------------//
+//            Startup task             //
+//-------------------------------------//
+void main()
+{
+    isp_security_loop();                               // ISP mode recovery delay
+
+    target_init();
+
+    timers_init();
+    led_init();
+    uart_init(18432000, 6, 19200);                     // init HW232 komunikace
+    event_init();
+    event_send(EVENT_STARTUP, 0);
+    stdout_init(uart_putchar);
+    tsense_init();
+
+    printf("Thermostat %s.%s, current MCU: %s, date: %s"BR"type ? for help"DBR, VERSION, BUILD, target_mcu_str[TARGET_MCU], __DATE__);
+    
+    cmd_init(CMD_SESSION_ID_TERMINAL, &CMD_TAB_TERMINAL, sizeof(CMD_TAB_TERMINAL), &main_terminal_parbuf, sizeof(main_terminal_parbuf));
+
+    if(~cmd_validate_test(CMD_SESSION_ID_TERMINAL))       // validace tabulky prikazu
+        printf("CMD TABLE ERROR!\r\n");
+
+    main_measure_loop = 0;
+
+    while(1)
+    {
+        isp_security_check();
+
+        if(uart_ribuf)                                    // zpracovani prichoziho znaku po HWCOM
+        {
+            putchar(uart_rbyte);
+            main_uart_command(cmd_detect(CMD_SESSION_ID_TERMINAL, uart_rbyte));
+        }
+
+        if(event_ready)                                   // zpracovani udalosti
+            main_event_proc(event_id, event_value);
+
+        if(event_overflow)
+        {
+            event_overflow = 0;
+            printf("EVENT OVERFLOW!\r\n");
+        }
+
+        if(main_measure_request)
+        {
+            if(!TIMER_MEASURE)
+            {
+                tsense_add_task(0, EVENT_TSENSE_FINISH);
+
+                TIMER_MEASURE = TIME_500MS;//cmd_getparnum(CMD_SESSION_ID_TERMINAL, 0, 4);
+                main_measure_request = 0;
+            }
+        }
+
+        event_proc();
+        uart_proc();
+        led_proc();
+        tsense_proc();
+    }
+}
+
+

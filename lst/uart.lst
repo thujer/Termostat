@@ -1,0 +1,509 @@
+C51 COMPILER V8.05a   UART                                                                 04/16/2009 20:53:44 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE UART
+OBJECT MODULE PLACED IN .\obj\uart.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\uart.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\uart.lst) OBJ
+                    -ECT(.\obj\uart.obj)
+
+line level    source
+
+   1          
+   2              /////////////////////////////////////////////////////////////////////////////
+   3              // +---------------------------------------------------------------------+ //
+   4              // |                          UART - Serial Driver                       | //
+   5              // |                     ------------------------------                  | //
+   6              // |                       Verze 2.36Tiny Build 081229                   | //
+   7              // |                                                                     | //
+   8              // |                         Copyright Tomas Hujer                       | //
+   9              // |                             (c) 2005-2008                           | //
+  10              // |                      thomas.hoodger(at)gmail.com                    | //
+  11              // |                                                                     | //
+  12              // +---------------------------------------------------------------------+ //
+  13              //  Driver for buffered, interrupt communication via RS232                 //
+  14              //  Here is 2 buffers - for receive and for send data. Index of each       //
+  15              //  buffer is rotating type. Each buffer have two indexs - first for       //
+  16              //  write to buffer, second for read from buffer.                          //
+  17              //                                                                         //
+  18              //  Interrupt routine write receive data to uart_recbuf                    //
+  19              //  Sending process is directing by routine UART_PROC(). This routine is   //
+  20              //  called from main loop each or few cycle. Routine wait for count-down   //
+  21              //  variable UART_SDELAY, then read byte from UART_SNDBUF and write him    //
+  22              //  to SBUF.                                                               //
+  23              //                                                                         //
+  24              // ----------------------------------------------------------------------- //
+  25              //                                                                         //
+  26              //  Version history from 2.25:                                             //
+  27              //                                                                         //
+  28              //        -------------------------------------------------------------    //
+  29              //        2.27   - Pridan status uart_rb_overflow - signalizuje            //
+  30              //                 preteceni prijimaciho bufferu, resetuje se              //
+  31              //                 v hlavni smycce.                                        //
+  32              //        -------------------------------------------------------------    //
+  33              //        2.28   - UART_id.k prejmenovano na UART_drv.def                  //
+  34              //                 definice velikosti bufferu presunty do UART_drv.def     //
+  35              //        -------------------------------------------------------------    //
+  36              //        2.29   - Upraveno pro minimalni hw naroky                        //
+  37              //        -------------------------------------------------------------    //
+  38              //        2.30   - Osetren stav nahodneho prepsani indexu pro              //
+  39              //                 zapis a cteni. Indexy jsou pri kazdem dokonceni         //
+  40              //                 prijmu nebo vysilani resetovany.                        //
+  41              //        -------------------------------------------------------------    //
+  42              //        2.33   - Opraveno cyklicke volani preruseni po odeslani          //
+  43              //                 znaku, osetreno nastavenim flagu v preruseni,           //
+  44              //                 pridan timeout pro dokonceni odeslani znaku             //
+  45              //        -------------------------------------------------------------    //
+  46              //        2.34   - Opraven algoritmus ukladani a vycitani prijatych znaku  //
+  47              //                 z bufferu, nahodne zpusoboval kolaps - chybne vycteni   //
+  48              //                 znaku z bufferu pri prijmu vice znaku (cca 60ti)        //
+  49              //        -------------------------------------------------------------    //
+  50              //        2.35   - Upraveno pro variantu LPC922                            //
+  51              //        -------------------------------------------------------------    //
+  52              //        2.36   - Upravena inicializace parametru komunikace pro LPC922   //
+  53              //               - Pridana detekce break, framing error a overrun          //
+  54              //               - Provedeno Boot recovery pri detekci signalu BREAK       //
+  55              //        -------------------------------------------------------------    //
+  56              //                                                                         //
+  57              // ----------------------------------------------------------------------- //
+  58              /////////////////////////////////////////////////////////////////////////////
+  59          
+  60          #pragma LIST
+  61          #pragma PAGELENGTH(30000);
+  62          #pragma LINES
+  63          
+  64          #include "target.def"
+  65          #include TARGET_SFR_HEADER
+  66          
+  67          #include "led.def"
+  68          #include "led.h"
+  69          #include "timers.h"
+  70          #include "uart.def"
+  71          #include "uart.h"
+  72          #include "uart.mcu"
+  73          
+  74          #define uchar unsigned char
+  75          #define uint  unsigned int
+  76          #define ulong unsigned long
+  77          
+  78          /*-------------------------------------------------------------------------*/
+  79          uchar  TARGET_XMEM  uart_recbuf[UART_RECBUFSIZE];
+  80          uchar  TARGET_MMEM  uart_rw_ix;
+  81          uchar  TARGET_MMEM  uart_rr_ix;
+  82          char   TARGET_MMEM  uart_rbyte;
+  83          
+  84          /*-------------------------------------------------------------------------*/
+  85          // Flagy komunikace
+  86          bit                 uart_ribuf;                        // flag prichoziho znaku v bufferu
+  87          bit                 uart_transfer_finished;            // flag dokonceni odesilani znaku
+  88          bit                 uart_rb_overflow;                  // flag preteceni prijimaciho bufferu
+  89          
+  90          /*-------------------------------------------------------------------------*/
+  91          // Chyby na komunikaci
+  92          #if TARGET_MCU == LPC922
+              bit                 uart_detected_break;               // flag detekce prichoziho break
+              bit                 uart_detected_framing_error;       // flag detekce chybneho ramce
+              bit                 uart_detected_overrun;             // flag detekce prepsani znaku
+              #endif
+  97          
+  98          /*-------------------------------------------------------------------------*/
+  99          #define             UART_TRANSFER_TIME    TIME_1SEC;
+ 100          
+ 101          
+ 102          
+ 103          // +--------------------------------------------------------------+ //
+ 104          // |                       Init serial UART                       | //
+ 105          // +--------------------------------------------------------------+ //
+ 106          // | cpu_xtal    ... xtal rezonator frequency [Hz] (18432000)     | //
+ 107          // | tact        ... cpu ticks per instruction (6)                | //
+ 108          // | uart_speed  ... communication speed [baud] (19200)           | //
+ 109          // +--------------------------------------------------------------+ //
+ 110          void uart_init(ulong cpu_xtal, uchar tact, ulong uart_speed)
+ 111          {
+ 112   1          uchar i;
+ 113   1          uchar timer_value;
+ 114   1      
+ 115   1          // vypocti hodnotu timeru
+ 116   1          timer_value = (cpu_xtal / tact) / uart_speed;
+ 117   1      
+ 118   1          // vymaz buffer
+ 119   1          for(i=0; i<sizeof(uart_recbuf); i++)
+ 120   1          {
+ 121   2              uart_recbuf[i]=0;
+ 122   2          }
+ 123   1      
+ 124   1          uart_ribuf = 0;
+ 125   1          uart_rw_ix = 0;
+ 126   1          uart_rr_ix = 0;
+ 127   1          uart_rbyte = 0;
+ 128   1          uart_rb_overflow = 0;
+ 129   1          uart_transfer_finished = 1;       // povol odeslani znaku
+ 130   1      
+ 131   1          #if TARGET_MCU == LPC922
+                  uart_detected_break = 0;
+                  uart_detected_framing_error = 0;
+                  uart_detected_overrun = 0;
+                  #endif
+ 136   1      
+ 137   1          uart_mcu_init(timer_value);
+ 138   1      }
+ 139          
+ 140          
+ 141          
+ 142          // +-----------------------------------------------------------------------+
+ 143          // |            Interrupt - Zapis prichoziho znaku do recbuf               |
+ 144          // +-----------------------------------------------------------------------+
+ 145          //
+ 146          //       ----------V-------------------------------- WR
+ 147          //       ----------V-------------------------------- RD
+ 148          //
+ 149          #pragma NOAREGS
+ 150          void uart_interrupt() interrupt 4 using 1
+ 151          {
+ 152   1          if(RI)                                        // Pokud prijaty znak
+ 153   1          {
+ 154   2              RI = 0;                                   // Reset priznaku
+ 155   2      
+ 156   2              uart_rw_ix %= UART_RECBUFSIZE;            // rotuj index
+ 157   2              
+ 158   2              uart_recbuf[uart_rw_ix] = SBUF;           // zapis znak do bufferu
+ 159   2              uart_rw_ix++;                             // posun index
+ 160   2      
+ 161   2              if(uart_rw_ix == uart_rr_ix)              // pokud se indexy rovnaji, 
+ 162   2                  uart_rb_overflow = 1;                 // nastav flag preteceni bufferu
+ 163   2          }
+ 164   1      
+ 165   1          if(TI)
+ 166   1          {
+ 167   2              TI = 0;
+ 168   2              uart_transfer_finished = 1;
+ 169   2          }
+ 170   1      
+ 171   1          #if TARGET_MCU == LPC922
+                  if(uart_mcu_detect_break())                   // pokud detekovan signal break
+                      uart_detected_break = 1;                  // nastav flag
+              
+                  if(uart_mcu_detect_framing_error())           // pokud detekovana chyba ramce
+                      uart_detected_framing_error = 1;          // nastav flag
+              
+                  if(uart_mcu_detect_overrun())                 // pokud znak prepsan
+                      uart_detected_overrun = 1;                // nastav flag
+                  #endif
+ 181   1      }
+ 182          #pragma AREGS
+ 183          
+ 184          
+ 185          // +-------------------------------------------------+
+ 186          // |   Waiting for transfer complete or timeout      |
+ 187          // +-------------------------------------------------+
+ 188          void uart_wait_for_transfer()
+ 189          {
+ 190   1          TIMER_UART = UART_TRANSFER_TIME;
+ 191   1      
+ 192   1          // cekej dokud neni dokonceno odesilani znaku nebo vyprsel timeout    
+ 193   1          while((~uart_transfer_finished) && TIMER_UART);
+ 194   1      
+ 195   1          uart_transfer_finished = 0;
+ 196   1      }
+ 197          
+ 198          
+ 199          // +-------------------------------------------------+
+ 200          // |             UART device output routine          |
+ 201          // +-------------------------------------------------+
+ 202          char uart_putchar(char c)
+ 203          {
+ 204   1          uart_wait_for_transfer();
+ 205   1          SBUF = c;
+ 206   1      
+ 207   1          led_blink(LED_ID_HWCOM_SND);                // Rozvit signalizacni LED
+ 208   1      
+ 209   1          return(c);
+ 210   1      }
+ 211          
+ 212          
+ 213          
+ 214          // +-------------------------------------------------+
+ 215          // |           Vyzvednuti znaku z recbuf             |
+ 216          // +-------------------------------------------------+
+ 217          void uart_proc()
+ 218          {
+ 219   1          if(uart_rr_ix != uart_rw_ix)                // pokud je v bufferu znak
+ 220   1          {
+ 221   2              //ES = 0;                                 // zakaz preruseni
+ 222   2              uart_rr_ix %= UART_RECBUFSIZE;          // rotuj index
+ 223   2              uart_rbyte = uart_recbuf[uart_rr_ix];
+ 224   2              uart_rr_ix++;                           // Posun index
+ 225   2              uart_ribuf=1;                           // Nastav flag znaku v RBUF
+ 226   2              led_blink(LED_ID_HWCOM_REC);            // Rozvit signalizacni LED
+ 227   2              //ES = 1;
+ 228   2          }
+ 229   1          else
+ 230   1              uart_ribuf=0;                           // Nastav flag znaku v RBUF
+ 231   1      }
+ 232          
+C51 COMPILER V8.05a   UART                                                                 04/16/2009 20:53:44 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _uart_mcu_init (BEGIN)
+                                           ; SOURCE LINE # 8
+0000 8E00        R     MOV     timer_value,R6
+0002 8F00        R     MOV     timer_value+01H,R7
+                                           ; SOURCE LINE # 9
+                                           ; SOURCE LINE # 10
+0004         ?C0001:
+                                           ; SOURCE LINE # 319
+0004 E4                CLR     A
+0005 F598              MOV     SCON,A
+                                           ; SOURCE LINE # 326
+0007 C29F              CLR     SM0
+                                           ; SOURCE LINE # 330
+0009 D29E              SETB    SM1
+                                           ; SOURCE LINE # 337
+000B C29D              CLR     SM2
+                                           ; SOURCE LINE # 342
+000D D29C              SETB    REN
+                                           ; SOURCE LINE # 346
+000F C29B              CLR     TB8
+                                           ; SOURCE LINE # 350
+0011 C29A              CLR     RB8
+                                           ; SOURCE LINE # 356
+0013 C299              CLR     TI
+                                           ; SOURCE LINE # 361
+0015 C298              CLR     RI
+                                           ; SOURCE LINE # 383
+0017 758BFB            MOV     TL1,#0FBH
+                                           ; SOURCE LINE # 384
+001A 758DFB            MOV     TH1,#0FBH
+                                           ; SOURCE LINE # 385
+001D D28E              SETB    TR1
+                                           ; SOURCE LINE # 386
+001F 438920            ORL     TMOD,#020H
+                                           ; SOURCE LINE # 402
+0022 F59B              MOV     BDRCON,A
+                                           ; SOURCE LINE # 439
+0024 53877F            ANL     PCON,#07FH
+                                           ; SOURCE LINE # 472
+0027 D2AC              SETB    ES
+                                           ; SOURCE LINE # 475
+0029 22                RET     
+             ; FUNCTION _uart_mcu_init (END)
+
+             ; FUNCTION _uart_init (BEGIN)
+                                           ; SOURCE LINE # 110
+0000 8F00        R     MOV     cpu_xtal+03H,R7
+0002 8E00        R     MOV     cpu_xtal+02H,R6
+0004 8D00        R     MOV     cpu_xtal+01H,R5
+0006 8C00        R     MOV     cpu_xtal,R4
+                                           ; SOURCE LINE # 111
+                                           ; SOURCE LINE # 116
+0008 AF00        R     MOV     R7,tact
+000A AB07              MOV     R3,AR7
+000C E4                CLR     A
+000D FA                MOV     R2,A
+000E F9                MOV     R1,A
+000F F8                MOV     R0,A
+0010 AF00        R     MOV     R7,cpu_xtal+03H
+0012 120000      E     LCALL   ?C?ULDIV
+0015 AB00        R     MOV     R3,uart_speed+03H
+0017 AA00        R     MOV     R2,uart_speed+02H
+0019 A900        R     MOV     R1,uart_speed+01H
+001B A800        R     MOV     R0,uart_speed
+001D 120000      E     LCALL   ?C?ULDIV
+;---- Variable 'timer_value' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 119
+;---- Variable 'i' assigned to Register 'R6' ----
+0020         ?C0003:
+                                           ; SOURCE LINE # 120
+                                           ; SOURCE LINE # 121
+0020 7E0A              MOV     R6,#0AH
+0022 900000      R     MOV     DPTR,#uart_recbuf
+0025 E4                CLR     A
+0026         ?C0018:
+0026 F0                MOVX    @DPTR,A
+0027 A3                INC     DPTR
+0028 DEFC              DJNZ    R6,?C0018
+                                           ; SOURCE LINE # 122
+002A         ?C0004:
+                                           ; SOURCE LINE # 124
+002A C200        R     CLR     uart_ribuf
+                                           ; SOURCE LINE # 125
+002C E4                CLR     A
+002D 7800        R     MOV     R0,#LOW uart_rw_ix
+002F F6                MOV     @R0,A
+                                           ; SOURCE LINE # 126
+0030 7800        R     MOV     R0,#LOW uart_rr_ix
+0032 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 127
+0033 08                INC     R0
+0034 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 128
+0035 C200        R     CLR     uart_rb_overflow
+                                           ; SOURCE LINE # 129
+0037 D200        R     SETB    uart_transfer_finished
+                                           ; SOURCE LINE # 137
+0039 FE                MOV     R6,A
+003A 020000      R     LJMP    _uart_mcu_init
+             ; FUNCTION _uart_init (END)
+
+             ; FUNCTION uart_interrupt (BEGIN)
+0000 C0E0              PUSH    ACC
+0002 C0F0              PUSH    B
+0004 C083              PUSH    DPH
+0006 C082              PUSH    DPL
+0008 C0D0              PUSH    PSW
+000A 75D008            MOV     PSW,#08H
+                                           ; SOURCE LINE # 150
+                                           ; SOURCE LINE # 152
+000D 309824            JNB     RI,?C0007
+                                           ; SOURCE LINE # 153
+                                           ; SOURCE LINE # 154
+0010 C298              CLR     RI
+                                           ; SOURCE LINE # 156
+0012 7800        R     MOV     R0,#LOW uart_rw_ix
+0014 E6                MOV     A,@R0
+0015 75F00A            MOV     B,#0AH
+0018 84                DIV     AB
+0019 E5F0              MOV     A,B
+001B F6                MOV     @R0,A
+                                           ; SOURCE LINE # 158
+001C E6                MOV     A,@R0
+001D 2400        R     ADD     A,#LOW uart_recbuf
+001F F582              MOV     DPL,A
+0021 E4                CLR     A
+0022 3400        R     ADDC    A,#HIGH uart_recbuf
+0024 F583              MOV     DPH,A
+0026 E599              MOV     A,SBUF
+0028 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 159
+0029 06                INC     @R0
+                                           ; SOURCE LINE # 161
+002A 7900        R     MOV     R1,#LOW uart_rw_ix
+002C E7                MOV     A,@R1
+002D 7800        R     MOV     R0,#LOW uart_rr_ix
+002F 66                XRL     A,@R0
+0030 7002              JNZ     ?C0007
+                                           ; SOURCE LINE # 162
+0032 D200        R     SETB    uart_rb_overflow
+                                           ; SOURCE LINE # 163
+0034         ?C0007:
+                                           ; SOURCE LINE # 165
+0034 309904            JNB     TI,?C0010
+                                           ; SOURCE LINE # 166
+                                           ; SOURCE LINE # 167
+0037 C299              CLR     TI
+                                           ; SOURCE LINE # 168
+0039 D200        R     SETB    uart_transfer_finished
+                                           ; SOURCE LINE # 169
+                                           ; SOURCE LINE # 181
+003B         ?C0010:
+003B D0D0              POP     PSW
+003D D082              POP     DPL
+003F D083              POP     DPH
+0041 D0F0              POP     B
+0043 D0E0              POP     ACC
+0045 32                RETI    
+             ; FUNCTION uart_interrupt (END)
+
+             ; FUNCTION uart_wait_for_transfer (BEGIN)
+                                           ; SOURCE LINE # 188
+                                           ; SOURCE LINE # 189
+                                           ; SOURCE LINE # 190
+0000 750000      E     MOV     timers,#00H
+0003 750064      E     MOV     timers+01H,#064H
+0006         ?C0011:
+                                           ; SOURCE LINE # 193
+0006 A200        R     MOV     C,uart_transfer_finished
+0008 B3                CPL     C
+0009 5006              JNC     ?C0012
+000B E500        E     MOV     A,timers+01H
+000D 4500        E     ORL     A,timers
+000F 70F5              JNZ     ?C0011
+0011         ?C0012:
+                                           ; SOURCE LINE # 195
+0011 C200        R     CLR     uart_transfer_finished
+                                           ; SOURCE LINE # 196
+0013 22                RET     
+             ; FUNCTION uart_wait_for_transfer (END)
+
+             ; FUNCTION _uart_putchar (BEGIN)
+                                           ; SOURCE LINE # 202
+0000 8F00        R     MOV     c,R7
+                                           ; SOURCE LINE # 203
+                                           ; SOURCE LINE # 204
+0002 120000      R     LCALL   uart_wait_for_transfer
+                                           ; SOURCE LINE # 205
+0005 850099      R     MOV     SBUF,c
+                                           ; SOURCE LINE # 207
+0008 E4                CLR     A
+0009 FF                MOV     R7,A
+000A 120000      E     LCALL   _led_blink
+                                           ; SOURCE LINE # 209
+000D AF00        R     MOV     R7,c
+                                           ; SOURCE LINE # 210
+000F         ?C0014:
+000F 22                RET     
+             ; FUNCTION _uart_putchar (END)
+
+             ; FUNCTION uart_proc (BEGIN)
+                                           ; SOURCE LINE # 217
+                                           ; SOURCE LINE # 218
+                                           ; SOURCE LINE # 219
+0000 7800        R     MOV     R0,#LOW uart_rr_ix
+0002 E6                MOV     A,@R0
+0003 FF                MOV     R7,A
+0004 7800        R     MOV     R0,#LOW uart_rw_ix
+0006 66                XRL     A,@R0
+0007 601F              JZ      ?C0015
+                                           ; SOURCE LINE # 220
+                                           ; SOURCE LINE # 222
+0009 EF                MOV     A,R7
+000A 75F00A            MOV     B,#0AH
+000D 84                DIV     AB
+000E 7800        R     MOV     R0,#LOW uart_rr_ix
+0010 A6F0              MOV     @R0,B
+                                           ; SOURCE LINE # 223
+0012 E6                MOV     A,@R0
+0013 2400        R     ADD     A,#LOW uart_recbuf
+0015 F582              MOV     DPL,A
+0017 E4                CLR     A
+0018 3400        R     ADDC    A,#HIGH uart_recbuf
+001A F583              MOV     DPH,A
+001C E0                MOVX    A,@DPTR
+001D 08                INC     R0
+001E F6                MOV     @R0,A
+                                           ; SOURCE LINE # 224
+001F 18                DEC     R0
+0020 06                INC     @R0
+                                           ; SOURCE LINE # 225
+0021 D200        R     SETB    uart_ribuf
+                                           ; SOURCE LINE # 226
+0023 7F01              MOV     R7,#01H
+0025 020000      E     LJMP    _led_blink
+                                           ; SOURCE LINE # 228
+0028         ?C0015:
+                                           ; SOURCE LINE # 230
+0028 C200        R     CLR     uart_ribuf
+                                           ; SOURCE LINE # 231
+002A         ?C0017:
+002A 22                RET     
+             ; FUNCTION uart_proc (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    255    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     10    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      12
+   IDATA SIZE       =      3    ----
+   BIT SIZE         =      3    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

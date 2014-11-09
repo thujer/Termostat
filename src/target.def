@@ -1,0 +1,149 @@
+ 
+//*** <<< Use Configuration Wizard in Context Menu >>> *** 
+
+// +------------------------------------------------+ //
+// |                  Version 1.04                  | //
+// +------------------------------------------------+ //
+
+
+#ifndef __TARGET_DEF__
+    #define __TARGET_DEF__
+
+    // -----------------------------------------------------------------------------------------------------
+    // Mode select
+    #define REAL_MODE                   1
+    #define SIMUL_MODE                  2
+
+    //#define TARGET_MODE                 SIMUL_MODE          
+    #define TARGET_MODE                 REAL_MODE
+    
+    // -----------------------------------------------------------------------------------------------------
+    // <h> Processor type select
+    #define C51RD2                      1                           // P89C51RD2
+    #define C51ED2                      2                           // AT89C51ED2
+    #define LPC922                      3                           // 89LPC922
+
+    // <o> TARGET_MCU: TARGET_MCU <1=> C51RD2 <2=> C51ED2 <3=> LPC922
+    //#define TARGET_MCU                  C51RD2                      // Selected MCU
+    #define TARGET_MCU                  C51ED2                      // Selected MCU
+    //#define TARGET_MCU                  LPC922                      // Selected MCU
+
+    // </h>
+    // -----------------------------------------------------------------------------------------------------
+    // <h> Code size select
+    #define TARGET_CODE_SIZE_TINY       1                           
+    #define TARGET_CODE_SIZE_MEDIUM     2                           
+    #define TARGET_CODE_SIZE_LARGE      3                           
+
+    // <o> TARGET_CODE_SIZE: TARGET_CODE_SIZE <1=> TINY <2=> MEDIUM <3=> LARGE
+    #define TARGET_CODE_SIZE            TARGET_CODE_SIZE_TINY       // selected size
+    // </h>
+    // -----------------------------------------------------------------------------------------------------
+    #if TARGET_MCU == LPC922
+        #define TARGET_SFR_HEADER   "reg922.h"
+        #define TARGET_SFR_INC      reg922.inc
+    #endif
+
+    #if TARGET_MCU == C51RD2
+        #define TARGET_SFR_HEADER   "reg52.h"
+        #define TARGET_SFR_INC      reg52.inc
+    #endif
+
+    #if TARGET_MCU == C51ED2
+        #define TARGET_SFR_HEADER   "at89c51xd2.h"
+        #define TARGET_SFR_INC      at89c51xd2.inc
+    #endif
+
+    #if (TARGET_MCU == C51RD2)
+        #define SAVE_ALL_INTERRUPT_STATE        push    IE                  ; save EA Status
+        #define RECOVERY_ALL_INTERRUPT_STATE    pop     IE                  ; load EA status
+    #endif
+    
+    #if (TARGET_MCU == C51ED2)
+        #define SAVE_ALL_INTERRUPT_STATE        push    IEN0                ; save EA Status
+        #define RECOVERY_ALL_INTERRUPT_STATE    pop     IEN0                ; load EA status
+    #endif
+    
+    #if (TARGET_MCU == LPC922)
+        #define SAVE_ALL_INTERRUPT_STATE        push    IE                  ; save EA Status
+        #define RECOVERY_ALL_INTERRUPT_STATE    pop     IE                  ; load EA status
+    #endif
+    // -----------------------------------------------------------------------------------------------------
+    #define INPUT_ROUTE_REAL           1                           // inputs forwarded for real mode
+    #define INPUT_ROUTE_SIMUL          2                           // inputs forwarded for simulator mode
+
+    #define TARGET_INPUT               INPUT_ROUTE_REAL            // selected input mode 
+    //#define TARGET_INPUT               INPUT_ROUTE_SIMUL           // selected input mode 
+
+    // -----------------------------------------------------------------------------------------------------
+    // <h>
+    #define OUTPUT_ROUTE_TABLE_REAL     1                           // outputs forwarded for real mode
+    #define OUTPUT_ROUTE_TABLE_SIMUL    2                           // outputs forwarded for simulator mode
+
+    // <o> TARGET_OUTPUT: TARGET_OUTPUT <OUTPUT_ROUTE_TABLE_REAL, OUTPUT_ROUTE_TABLE_SIMUL>
+    // <i> Output route table dependece on this setting
+    #if TARGET_MODE == REAL_MODE
+        #define TARGET_OUTPUT           OUTPUT_ROUTE_TABLE_REAL     // selected output route table
+    #else
+        #define TARGET_OUTPUT           OUTPUT_ROUTE_TABLE_SIMUL    // selected output route table
+    #endif
+
+    // </h>
+    // -----------------------------------------------------------------------------------------------------
+    #if TARGET_MCU == C51RD2
+        #define TARGET_FREQUENCY        18
+        #define TARGET_XTAL             18432000
+        #define TARGET_INSTRUCTION_STEP 6
+    #endif
+
+    #if TARGET_MCU == C51ED2
+        #define TARGET_FREQUENCY        18
+        #define TARGET_XTAL             18432000
+        #define TARGET_INSTRUCTION_STEP 6
+    #endif
+
+    #if TARGET_MCU == LPC922
+        #define TARGET_FREQUENCY        7
+        #define TARGET_XTAL             7372800
+        #define TARGET_INSTRUCTION_STEP 2
+    #endif
+
+    // -----------------------------------------------------------------------------------------------------
+    // Next line string
+    #define BR                         "\r\n"
+    #define DBR                        "\r\n\n"
+    //#define BR                         "\n"
+    //#define DBR                        "\n\n"
+    // -----------------------------------------------------------------------------------------------------
+    // Select IAP code address by MCU type
+    #if TARGET_MCU == C51RD2
+        #define TARGET_IAP_ROUTINE      0xFFF0
+    #endif
+
+    #if TARGET_MCU == C51ED2
+        #define TARGET_IAP_ROUTINE      0xFFF0
+    #endif
+
+    #if TARGET_MCU == LPC922
+        #define TARGET_IAP_ROUTINE      0xFF03              // 0x1FF0       //  IAP routine start adress
+    #endif
+
+    // -----------------------------------------------------------------------------------------------------
+    // Select extended storage by MCU type  
+    #if TARGET_MCU == LPC922
+        #define TARGET_XMEM             idata
+        #define TARGET_MMEM             idata
+        #define TARGET_SMEM             data
+    #else
+        #define TARGET_XMEM             xdata
+        #define TARGET_MMEM             idata
+        #define TARGET_SMEM             data
+    #endif
+
+    #define uchar unsigned char
+    #define uint  unsigned int
+    #define ulong unsigned long
+
+    // -----------------------------------------------------------------------------------------------------
+#endif
+// <<< end of configuration section >>>

@@ -1,0 +1,286 @@
+
+
+#include "target.def"
+#include "target.h"
+#include "timers.h"
+
+#define uchar unsigned char
+
+
+#pragma NOAREGS
+// +--------------------------------------------------------------------+
+// | Volano z preruseni - obsluha tiku casovace podle MCU               |
+// +--------------------------------------------------------------------+
+bit timer_mcu_interupt_service()
+{
+    bit   return_value;
+
+    #if TARGET_MCU == LPC922
+        // reinitialize (for 1ms)
+        TH0 = 0x71;
+        TL0 = 0x99;
+    
+        return_value = 1;
+    #endif
+
+
+    #if TARGET_MCU == C51RD2
+        if(TF2)
+        {
+            TF2=0;
+            return_value = 1;
+        }
+        else
+            return_value = 0;
+
+        EXF2=0;
+    #endif
+
+
+    #if TARGET_MCU == C51ED2
+        if(TF2)
+        {
+            TF2=0;
+            return_value = 1;                                 
+        }
+        else
+            return_value = 0;
+
+        EXF2=0;
+    #endif
+
+    return(return_value);
+}
+#pragma AREGS
+
+
+
+void timers_mcu_init()
+{
+    #if TARGET_MCU==LPC922
+        // configure timer 0
+        TMOD &= 0xF0;
+        TMOD |= 0x01;
+        TAMOD &= 0xFE;
+        
+        // timer values for 10ms
+        //TH0 = 0x70;
+        //TL0 = 0x00;
+        
+        // timer values for 1ms
+        TH0 = 0x71;
+        TL0 = 0x99;
+        
+        // set timer 0 isr priority to 3
+        IP0  &= 0xFD;
+        IP0H &= 0xFD;
+        IP0  |= 0x02;
+        IP0H |= 0x02;
+        
+        // enable timer 0 interrupt
+        ET0 = 1;
+        
+        // start timer 0
+        TR0 = 1;
+    #endif
+
+
+    #if TARGET_MCU==C51RD2
+        uchar i;
+    
+        for(i=0; i<TIMERS_COUNT; i++) 
+        {
+            timers[i]=0;
+        }
+    
+        //--------------------------------------------//
+        //       Timer 2 Mode Control Register        //
+        //--------------------------------------------//
+        //
+        //     7    6    5    4    3    2    1    0
+        //  +-----------------------------------------+
+        //  |  -    -    -    -    -    -  T2OE DCEN  |
+        //  +-----------------------------------------+
+        //
+        T2MOD=0;
+        //  ///////////
+        //  T2OE=0;  // -> Timer 2 Output Enable bit
+        //           //    Clear to program P1.0/T2 as clock input or I/O port.
+        //           //    Set to program P1.0/T2 as clock output.
+        //           //
+        //  DCEN=0;  // -> Down Counter Enable bit
+        //           //    Clear to disable timer 2 as up/down counter.
+        //           //    Set to enable timer 2 as up/down counter.
+        //--------------------------------------------//
+        
+        //--------------------------------------------//
+        //           Timer 2 Control Register         //
+        //--------------------------------------------//
+        T2CON=0;
+        ///////////
+        TF2=0;   // -  Timer 2 overflow Flag
+               //    TF2 is not set if RCLK=1 or TCLK = 1.
+               //    Must be cleared by software.
+               //    Set by hardware on timer 2 overflow.
+               //
+        EXF2=0;  // -  Timer 2 External Flag
+               //    Set when a capture or a reload is caused by a negative transition on T2EX pin
+               //    if EXEN2=1
+               //    Set to cause the CPU to vector to timer 2 interrupt routine when timer 2 interrupt
+               //    is enabled.
+               //    Must be cleared by software.
+               //
+        RCLK=0;  //    Receive Clock bit
+               //    Clear to use timer 1 overflow as receive clock for serial port in mode 1 or 3.
+               //    Set to use timer 2 overflow as receive clock for serial port in mode 1 or 3.
+               //
+        TCLK=0;  // -  Transmit Clock bit
+               //    Clear to use timer 1 overflow as transmit clock for serial port in mode 1 or 3
+               //    Set to use timer 2 overflow as transmit clock for serial port in mode 1 or 3.
+               //
+        EXEN2=0; // -  Timer 2 External Enable bit
+               //    Clear to ignore events on T2EX pin for timer 2 operation.
+               //    Set to cause a capture or reload when a negative transition on T2EX pin is
+               //    detected, if timer 2 is not used to clock the serial port.
+               //
+        TR2=1;   // -  Timer 2 Run control bit
+               //    Clear to turn off timer 2.
+               //    Set to turn on timer 2.
+               //
+        C_T2=0;  // -  Timer/Counter 2 select bit
+               //    Clear for timer operation (input from internal clock system: F OSC).
+               //    Set for counter operation (input from T2 input pin).
+               //
+        CP_RL2=0;// -  Timer 2 Capture/Reload bit
+               //    If RCLK=1 or TCLK=1, CP/RL2# is ignored and timer is forced to auto-reload on
+               //    timer 2 overflow.
+               //    Clear to auto-reload on timer 2 overflows or negative transitions on T2EX pin if
+               //    EXEN2=1.
+               //    Set to capture on negative transitions on T2EX pin if EXEN2=1.
+        
+        //  ----------------------------------------------------------
+        //    RCLK+TCLK  CP_RL2    TR2        Mode
+        //  ----------------------------------------------------------
+        //        0        0        1         16-bit auto-reload         X
+        //        0        1        1         16-bit capture
+        //        1        X        1         baud rate generator
+        //        X        X        0         (off)
+        //  ----------------------------------------------------------
+        
+        
+        
+        // Pri 6-taktovem rezimu, f osc=18432Mhz a hodnote citace 7800h
+        // probiha preruseni kazdych 10ms, pokud se tedy nastavi hodnota
+        // timeoutu 100, je odpocitavana doba 1s
+        
+        RCAP2L = 0xFF;   // Timer 2 control low      (FFFFh - 7800h)
+        RCAP2H = 0x87;   // Timer 2 control high
+        
+        T2CON = 0;       // Timer 2 control
+        TF2 = 0;         // Nulovani priznaku pro vznik preruseni pretecenim casovace 2
+        EXF2 = 0;        // Nulovani priznaku pro vznik preruseni
+        ET2 = 1;         // Timer 2 - povoleni preruseni
+        TR2 = 1;         // Start citace 2
+    #endif
+
+    #if TARGET_MCU==C51ED2
+        //--------------------------------------------//
+        //       Timer 2 Mode Control Register        //
+        //--------------------------------------------//
+        //
+        //     7    6    5    4    3    2    1    0
+        //  +-----------------------------------------+
+        //  |  -    -    -    -    -    -  T2OE DCEN  |
+        //  +-----------------------------------------+
+        //
+        T2MOD=0;
+        //  ///////////
+        //  T2OE=0;  // -> Timer 2 Output Enable bit
+        //           //    Clear to program P1.0/T2 as clock input or I/O port.
+        //           //    Set to program P1.0/T2 as clock output.
+        //           //
+        //  DCEN=0;  // -> Down Counter Enable bit
+        //           //    Clear to disable timer 2 as up/down counter.
+        //           //    Set to enable timer 2 as up/down counter.
+        //--------------------------------------------//
+        
+        //--------------------------------------------//
+        //           Timer 2 Control Register         //
+        //--------------------------------------------//
+        T2CON=0;
+        ///////////
+        TF2=0;   // -  Timer 2 overflow Flag
+               //    TF2 is not set if RCLK=1 or TCLK = 1.
+               //    Must be cleared by software.
+               //    Set by hardware on timer 2 overflow.
+               //
+        EXF2=0;  // -  Timer 2 External Flag
+               //    Set when a capture or a reload is caused by a negative transition on T2EX pin
+               //    if EXEN2=1
+               //    Set to cause the CPU to vector to timer 2 interrupt routine when timer 2 interrupt
+               //    is enabled.
+               //    Must be cleared by software.
+               //
+        RCLK=0;  //    Receive Clock bit
+               //    Clear to use timer 1 overflow as receive clock for serial port in mode 1 or 3.
+               //    Set to use timer 2 overflow as receive clock for serial port in mode 1 or 3.
+               //
+        TCLK=0;  // -  Transmit Clock bit
+               //    Clear to use timer 1 overflow as transmit clock for serial port in mode 1 or 3
+               //    Set to use timer 2 overflow as transmit clock for serial port in mode 1 or 3.
+               //
+        EXEN2=0; // -  Timer 2 External Enable bit
+               //    Clear to ignore events on T2EX pin for timer 2 operation.
+               //    Set to cause a capture or reload when a negative transition on T2EX pin is
+               //    detected, if timer 2 is not used to clock the serial port.
+               //
+        TR2=1;   // -  Timer 2 Run control bit
+               //    Clear to turn off timer 2.
+               //    Set to turn on timer 2.
+               //
+        C_T2=0;  // -  Timer/Counter 2 select bit
+               //    Clear for timer operation (input from internal clock system: F OSC).
+               //    Set for counter operation (input from T2 input pin).
+               //
+        CP_RL2=0;// -  Timer 2 Capture/Reload bit
+               //    If RCLK=1 or TCLK=1, CP/RL2# is ignored and timer is forced to auto-reload on
+               //    timer 2 overflow.
+               //    Clear to auto-reload on timer 2 overflows or negative transitions on T2EX pin if
+               //    EXEN2=1.
+               //    Set to capture on negative transitions on T2EX pin if EXEN2=1.
+        
+        //  ----------------------------------------------------------
+        //    RCLK+TCLK  CP_RL2    TR2        Mode
+        //  ----------------------------------------------------------
+        //        0        0        1         16-bit auto-reload         X
+        //        0        1        1         16-bit capture
+        //        1        X        1         baud rate generator
+        //        X        X        0         (off)
+        //  ----------------------------------------------------------
+        
+        
+        
+        // Pri 6-taktovem rezimu, f osc=18432Mhz a hodnote citace 7800h
+        // probiha preruseni kazdych 10ms, pokud se tedy nastavi hodnota
+        // timeoutu 100, je odpocitavana doba 1s
+        
+        RCAP2L = 0xFF;   // Timer 2 control low      (FFFFh - 7800h)
+        RCAP2H = 0x87;   // Timer 2 control high
+        
+        T2CON = 0;       // Timer 2 control
+        TF2 = 0;         // Nulovani priznaku pro vznik preruseni pretecenim casovace 2
+        EXF2 = 0;        // Nulovani priznaku pro vznik preruseni
+        ET2 = 1;         // Timer 2 - povoleni preruseni
+        TR2 = 1;         // Start citace 2
+
+        // Clock control register 0
+        // 7   6    5    4     3    2    1   0
+        // - WDX2 PCAX2 SIX2 T2X2 T1X2 T0X2 X2        
+        CKCON0 |= 0x08;                                 // T2X2 default (12 tick) speed
+
+        IPH0 |= PT2H;   // set external interrupt priority high flag
+        IPL0 &= ~PT2H;
+
+    #endif
+}
+

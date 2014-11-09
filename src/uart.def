@@ -1,0 +1,4 @@
+
+
+// Definice velikosti bufferu
+#define UART_RECBUFSIZE   10

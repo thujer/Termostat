@@ -1,0 +1,348 @@
+C51 COMPILER V8.05a   PIN                                                                  04/16/2009 20:53:45 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE PIN
+OBJECT MODULE PLACED IN .\obj\pin.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\pin.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\pin.lst) OBJEC
+                    -T(.\obj\pin.obj)
+
+line level    source
+
+   1          
+   2              /////////////////////////////////////////////////////////////////////////////
+   3              // +---------------------------------------------------------------------+ //
+   4              // |                             PINs driver                             | //
+   5              // |                     ------------------------------                  | //
+   6              // |                            Verze 1.03Tiny                           | //
+   7              // |                                                                     | //
+   8              // |                     Tomas Hujer (c) 2005-2008                       | //
+   9              // |                    thomas.hoodger(at)gmail.com                      | //
+  10              // +---------------------------------------------------------------------+ //
+  11              // |                                                                     | //
+  12              // |  Konfigurace, nastaveni a testovani jednotlivych pinu MCU           | //
+  13              // |                                                                     | //
+  14              // +---------------------------------------------------------------------+ //
+  15              //    Version history:                                                     //
+  16              //                   ----------------------------------------------        //
+  17              //       1.01         Zakladni verze                                       //
+  18              //                   ----------------------------------------------        //
+  19              //       1.02         Upraveny popisky k jednotlivym funkcim               //
+  20              //                   ----------------------------------------------        //
+  21              //       1.03 090109  Zjednodusena rutina pin_get_state                    //
+  22              //                   ----------------------------------------------        //
+  23              //                                                                         //
+  24              // ----------------------------------------------------------------------- //
+  25              /////////////////////////////////////////////////////////////////////////////
+  26          #pragma LIST
+  27          #pragma PAGELENGTH(30000);
+  28          #pragma LINES
+  29          
+  30          #include "target.def"
+  31          #include TARGET_SFR_HEADER
+  32          
+  33          #define uchar unsigned char
+  34          #define uint  unsigned int 
+  35          
+  36          #include "pin.h"
+  37          #include "stdio.h"
+  38          
+  39          
+  40          // +---------------------------------------------------------------------+ //
+  41          // |  Zmena stavu pinu MCU                                               | //
+  42          // +---------------------------------------------------------------------+ //
+  43          // | char port_id ... ID portu na kterem se bude stav pinu menit (0..1)  | //
+  44          // | char pin_id  ... cislo pinu prislusneho portu (0..7)                | //
+  45          // | char state   ... nova hodnota pinu (0..1)                           | //
+  46          // +---------------------------------------------------------------------+ //
+  47          // | Vraci: void                                                         | //
+  48          // +---------------------------------------------------------------------+ //
+  49          void pin_change(uchar port_id, uchar pin_id, uchar state)
+  50          {
+  51   1          uchar pin_mask;
+  52   1          uchar pin_state;
+  53   1      
+  54   1          pin_mask  = (1 << pin_id);
+  55   1          pin_state = (state << pin_id);
+  56   1      
+  57   1          switch(port_id)
+  58   1          {
+  59   2              case PORT_ID_P0:  P0 = ((P0 & (~pin_mask)) | pin_state);     break;
+  60   2              case PORT_ID_P1:  P1 = ((P1 & (~pin_mask)) | pin_state);     break;
+  61   2      
+  62   2              #if (TARGET_MCU==C51RD2) || (TARGET_MCU==C51ED2)
+  63   2              case PORT_ID_P2:  P2 = ((P2 & (~pin_mask)) | pin_state);     break;
+  64   2              case PORT_ID_P3:  P3 = ((P3 & (~pin_mask)) | pin_state);     break;
+  65   2              #endif
+  66   2          }
+  67   1      }
+  68          
+  69          
+  70          // +---------------------------------------------------------------------+ //
+  71          // |  Zjisteni stavu pinu MCU                                            | //
+  72          // +---------------------------------------------------------------------+ //
+  73          // | Parametry:                                                          | //
+  74          // |  char port_id ... ID portu na kterem se bude stav pinu menit (0..1) | //
+  75          // |  char pin_id  ... cislo pinu prislusneho portu (0..7)               | //
+  76          // +---------------------------------------------------------------------+ //
+  77          // | Vraci:                                                              | //
+  78          // |  unsigned char state ... hodnota pinu (0..1)                        | //
+  79          // +---------------------------------------------------------------------+ //
+  80          bit pin_get_state(uchar port_id, uchar pin_id)
+  81          {
+  82   1          bit   out_value;
+  83   1          uchar port_mask;
+  84   1          uchar port_value;
+  85   1      
+  86   1          out_value = port_value = 0;
+  87   1          port_mask = (1 << pin_id);
+  88   1      
+  89   1          switch(port_id)
+  90   1          {
+  91   2              case PORT_ID_P0:  port_value = (P0 & port_mask);  break;
+  92   2              case PORT_ID_P1:  port_value = (P1 & port_mask);  break;
+  93   2      
+  94   2              #if (TARGET_MCU==C51RD2) || (TARGET_MCU==C51ED2)
+  95   2              case PORT_ID_P2:  port_value = (P2 & port_mask);  break;
+  96   2              case PORT_ID_P3:  port_value = (P3 & port_mask);  break;
+  97   2              #endif
+  98   2          }
+  99   1      
+ 100   1          out_value = (port_value?1:0);
+ 101   1      
+ 102   1          return(out_value);
+ 103   1      }
+ 104          
+ 105          
+ 106          // +---------------------------------------------------------------------+ //
+ 107          // |  Konfigurace pinu MCU                                               | //
+ 108          // +---------------------------------------------------------------------+ //
+ 109          // | Parametry:                                                          | //
+ 110          // |  char port_id ... ID portu na kterem se bude stav pinu menit (0..1) | //
+ 111          // |  char pin_id  ... cislo pinu prislusneho portu (0..7)               | //
+ 112          // |  char state   ... ID typu pinu:                                     | //
+ 113          // |                       PIN_TYPE_QUASI_BIDIRECTIONAL                  | //
+ 114          // |                       PIN_TYPE_PUSH_PULL                            | //
+ 115          // |                       PIN_TYPE_INPUT_ONLY                           | //
+ 116          // |                       PIN_TYPE_OPEN_DRAIN                           | //
+ 117          // |                                                                     | //
+ 118          // +---------------------------------------------------------------------+ //
+ 119          // | Vraci: void                                                         | //
+ 120          // +---------------------------------------------------------------------+ //
+ 121          #if  TARGET_MCU==LPC922
+              void pin_set(uchar port_id, uchar pin_id, uchar pin_type)
+              {
+                  uchar pin_mask;
+              
+                  pin_mask = (1 << pin_id);
+              
+                  switch(pin_type)
+                  {
+                      case PIN_TYPE_QUASI_BIDIRECTIONAL:
+                              switch(port_id)
+                              {
+                                  case 0: P0M1 &= ~pin_mask;    P0M2 &= ~pin_mask;   break;
+                                  case 1: P1M1 &= ~pin_mask;    P1M2 &= ~pin_mask;   break;
+                              }
+                              break;
+              
+                      case PIN_TYPE_PUSH_PULL:
+                              switch(port_id)
+                              {
+                                  case 0: P0M1 &= ~pin_mask;   P0M2 &= ~pin_mask;   break;
+                                  case 1: P1M1 |= pin_mask;    P1M2 |= pin_mask;    break;
+                              }
+                              break;
+              
+                      case PIN_TYPE_INPUT_ONLY:
+                              switch(port_id)
+                              {
+                                  case 0: P0M1 |= pin_mask;    P0M2 |= pin_mask;    break;
+                                  case 1: P1M1 &= ~pin_mask;   P1M2 &= ~pin_mask;   break;
+                              }
+                              break;
+              
+                      case PIN_TYPE_OPEN_DRAIN:
+                              switch(port_id)
+                              {
+                                  case 0: P0M1 |= pin_mask;    P0M2 |= pin_mask;   break;
+                                  case 1: P1M1 |= pin_mask;    P1M2 |= pin_mask;   break;
+                              }
+                              break;
+                  }
+              }
+              #endif
+ 164          
+C51 COMPILER V8.05a   PIN                                                                  04/16/2009 20:53:45 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _pin_change (BEGIN)
+                                           ; SOURCE LINE # 49
+;---- Variable 'port_id' assigned to Register 'R7' ----
+;---- Variable 'pin_id' assigned to Register 'R5' ----
+;---- Variable 'state' assigned to Register 'R3' ----
+                                           ; SOURCE LINE # 50
+                                           ; SOURCE LINE # 54
+0000 7401              MOV     A,#01H
+0002 A805              MOV     R0,AR5
+0004 08                INC     R0
+0005 8002              SJMP    ?C0016
+0007         ?C0015:
+0007 C3                CLR     C
+0008 33                RLC     A
+0009         ?C0016:
+0009 D8FC              DJNZ    R0,?C0015
+000B FE                MOV     R6,A
+;---- Variable 'pin_mask' assigned to Register 'R6' ----
+                                           ; SOURCE LINE # 55
+000C EB                MOV     A,R3
+000D A805              MOV     R0,AR5
+000F 08                INC     R0
+0010 8002              SJMP    ?C0018
+0012         ?C0017:
+0012 C3                CLR     C
+0013 33                RLC     A
+0014         ?C0018:
+0014 D8FC              DJNZ    R0,?C0017
+0016 FD                MOV     R5,A
+;---- Variable 'pin_state' assigned to Register 'R5' ----
+                                           ; SOURCE LINE # 57
+0017 EF                MOV     A,R7
+0018 14                DEC     A
+0019 6012              JZ      ?C0003
+001B 14                DEC     A
+001C 6017              JZ      ?C0004
+001E 14                DEC     A
+001F 601C              JZ      ?C0005
+0021 2403              ADD     A,#03H
+0023 701F              JNZ     ?C0006
+                                           ; SOURCE LINE # 58
+                                           ; SOURCE LINE # 59
+0025         ?C0002:
+0025 EE                MOV     A,R6
+0026 F4                CPL     A
+0027 5580              ANL     A,P0
+0029 4D                ORL     A,R5
+002A F580              MOV     P0,A
+002C 22                RET     
+                                           ; SOURCE LINE # 60
+002D         ?C0003:
+002D EE                MOV     A,R6
+002E F4                CPL     A
+002F 5590              ANL     A,P1
+0031 4D                ORL     A,R5
+0032 F590              MOV     P1,A
+0034 22                RET     
+                                           ; SOURCE LINE # 63
+0035         ?C0004:
+0035 EE                MOV     A,R6
+0036 F4                CPL     A
+0037 55A0              ANL     A,P2
+0039 4D                ORL     A,R5
+003A F5A0              MOV     P2,A
+003C 22                RET     
+                                           ; SOURCE LINE # 64
+003D         ?C0005:
+003D EE                MOV     A,R6
+003E F4                CPL     A
+003F 55B0              ANL     A,P3
+0041 4D                ORL     A,R5
+0042 F5B0              MOV     P3,A
+                                           ; SOURCE LINE # 66
+                                           ; SOURCE LINE # 67
+0044         ?C0006:
+0044 22                RET     
+             ; FUNCTION _pin_change (END)
+
+             ; FUNCTION _pin_get_state (BEGIN)
+                                           ; SOURCE LINE # 80
+;---- Variable 'port_id' assigned to Register 'R7' ----
+;---- Variable 'pin_id' assigned to Register 'R5' ----
+                                           ; SOURCE LINE # 81
+                                           ; SOURCE LINE # 86
+;---- Variable 'port_value' assigned to Register 'R6' ----
+0000 E4                CLR     A
+0001 FE                MOV     R6,A
+0002 C200        R     CLR     out_value
+                                           ; SOURCE LINE # 87
+0004 04                INC     A
+0005 A805              MOV     R0,AR5
+0007 08                INC     R0
+0008 8002              SJMP    ?C0020
+000A         ?C0019:
+000A C3                CLR     C
+000B 33                RLC     A
+000C         ?C0020:
+000C D8FC              DJNZ    R0,?C0019
+000E FD                MOV     R5,A
+;---- Variable 'port_mask' assigned to Register 'R5' ----
+                                           ; SOURCE LINE # 89
+000F EF                MOV     A,R7
+0010 14                DEC     A
+0011 6010              JZ      ?C0009
+0013 14                DEC     A
+0014 6013              JZ      ?C0010
+0016 14                DEC     A
+0017 6016              JZ      ?C0011
+0019 2403              ADD     A,#03H
+001B 7016              JNZ     ?C0007
+                                           ; SOURCE LINE # 90
+                                           ; SOURCE LINE # 91
+001D         ?C0008:
+001D E580              MOV     A,P0
+001F 5D                ANL     A,R5
+0020 FE                MOV     R6,A
+0021 8010              SJMP    ?C0007
+                                           ; SOURCE LINE # 92
+0023         ?C0009:
+0023 E590              MOV     A,P1
+0025 5D                ANL     A,R5
+0026 FE                MOV     R6,A
+0027 800A              SJMP    ?C0007
+                                           ; SOURCE LINE # 95
+0029         ?C0010:
+0029 E5A0              MOV     A,P2
+002B 5D                ANL     A,R5
+002C FE                MOV     R6,A
+002D 8004              SJMP    ?C0007
+                                           ; SOURCE LINE # 96
+002F         ?C0011:
+002F E5B0              MOV     A,P3
+0031 5D                ANL     A,R5
+0032 FE                MOV     R6,A
+                                           ; SOURCE LINE # 98
+0033         ?C0007:
+                                           ; SOURCE LINE # 100
+0033 EE                MOV     A,R6
+0034 C3                CLR     C
+0035 6001              JZ      ?C0012
+0037 D3                SETB    C
+0038         ?C0012:
+0038         ?C0013:
+0038 9200        R     MOV     out_value,C
+                                           ; SOURCE LINE # 102
+003A A200        R     MOV     C,out_value
+                                           ; SOURCE LINE # 103
+003C         ?C0014:
+003C 22                RET     
+             ; FUNCTION _pin_get_state (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    130    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

@@ -1,0 +1,18 @@
+
+
+#ifndef __LED_DEF__
+    #define __LED_DEF__
+
+    // port pro pripojeni LED
+    #define         LED_PORT  P0
+    
+    // definice jednotlivych LED
+    typedef enum {
+                    LED_ID_HWCOM_SND = 0,
+                    LED_ID_HWCOM_REC,
+                    LED_ID_MEASURE,
+    
+                    LED_COUNT
+    };
+    
+#endif

@@ -1,0 +1,3049 @@
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE CMD
+OBJECT MODULE PLACED IN .\obj\cmd.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\cmd.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\cmd.lst) OBJEC
+                    -T(.\obj\cmd.obj)
+
+line level    source
+
+   1          
+   2           /////////////////////////////////////////////////////////////////////////////
+   3           // +---------------------------------------------------------------------+ //
+   4           // |                      Detekce prikazu a parametru                    | //
+   5           // |                     ------------------------------                  | //
+   6           // |                           Verze 1.13.080329                         | //
+   7           // |                                                                     | //
+   8           // |                         Copyright Tomas Hujer                       | //
+   9           // |                             (c) 2005-2008                           | //
+  10           // |                      thomas.hoodger(at)gmail.com                    | //
+  11           // |                                                                     | //
+  12           // +---------------------------------------------------------------------+ //
+  13           // |  Detekuje sekvencni prikazy podle tabulky prikazu v parametru       | //
+  14           // |  cmd_detect(*cmd_tab, get_char). cmd_tab je pointer na tab.         | //
+  15           // |  get_char je promenna kde se sekvencne objevuje testovany znak.     | //
+  16           // |  Funkce prochazi tabulkou prikazu a prohledava nody, u kazdeho      | //
+  17           // |  prikazu je udan index nasledujiciho nodu. Jsou prohledavany        | //
+  18           // |  vsechny nasledne nody, dokud neni nalezen nod se stejnym indexem,  | //
+  19           // |  jako ma aktualni znak v prikazu. Pokud je nalezen oddelovaci znak  | //
+  20           // |  (separator) je prikaz kompletni a je vracena hodnota uvedena       | //
+  21           // |  prislusnem nodu.                                                   | //
+  22           // |  Tato verze byla vyvinuta pro minimalni naroky na pamet a mnozstvi  | //
+  23           // |  kodu.                                                              | //
+  24           // +---------------------------------------------------------------------+ //
+  25           //                                                                         //
+  26           //   Version history:                                                      //
+  27           //    1.01    070823  Prvni evolution verze                                //
+  28           //                                                                         //
+  29           //    1.02    071110  Pridana validace tabulky prikazu                     //
+  30           //                                                                         //
+  31           //    1.03    071111  Opravena chyba v detekci 1. prikazu                  //
+  32           //                                                                         //
+  33           //    1.04    071115  Opravena chyba v nacitani 2. a dalsich parametru     //
+  34           //                                                                         //
+  35           //    1.05    071218  Opravena sekvencni chyba, v urcite posloupnosti      //
+  36           //                    prikazu se mohlo stat, ze na zacatku prikazu         //
+  37           //                    nebyl vynulovan index a prikaz tak nebyl detekovat   //
+  38           //                    pripadu bylo minimum, napr. EEPREADH a ERRDEF        //
+  39           //                    byl index prikazu vynulovan az po E druheho prikazu  //
+  40           //                                                                         //
+  41           //    1.10    071218  Upraveno pro vice instanci                           //
+  42           //                    kazda instance ma vlastni pointer na buffer prikazu  //
+  43           //                    pointer nutno inicializovat po startu                //
+  44           //                                                                         //
+  45           //    1.11    071219  Funkce cmd_get_par_num upravena pro vice instanci    //
+  46           //                                                                         //
+  47           //    1.12    080329  Pridany funkce pro povoleni zobrazeni znaku          //
+  48           //                                                                         //
+  49           //                    pokud probiha ukladani parametru (pro backspace)     //
+  50           //                    bit cmd_get_par_save_state(uchar session_id)         //
+  51           //                                                                         //
+  52           //                    pokud neni plny buffer parametru (pro echo. znaku)   //
+  53           //                    bit cmd_char_print_allowed(uchar session_id)         //
+  54           //                                                                         //
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 2   
+
+  55           //    1.13    080422  Pridan vypis vsech prikazu tabulky                   //
+  56           //                                                                         //
+  57           //    1.14    080520  Doplnen specialni znak '>' - pokud je prikaz konci   //
+  58           //                    timto znakem, neuklada se parametr a neceka se       //
+  59           //                    na odradkovani pro dokonceni prikazu                 //
+  60           //                                                                         //
+  61           /////////////////////////////////////////////////////////////////////////////
+  62          
+  63          
+  64          #define uchar unsigned char
+  65          #define uint unsigned int
+  66          
+  67          #include <stdio.h>
+  68          #include "target.def"
+  69          #include "cmd.h"
+  70          #include "str.h"
+  71          
+  72          
+  73          #define CMD_SEPARATOR    '@'
+  74          #define CMD_NODE_ID      cmd[session_id].cmd_tab[cmd_offs]              // Node start (separator)
+  75          #define CMD_NODE_IX      cmd[session_id].cmd_tab[cmd_offs + 1]          // Node index
+  76          #define CMD_NEXT_NODE    cmd[session_id].cmd_tab[cmd_offs + 2]          // Next node index
+  77          #define CMD_ID           cmd[session_id].cmd_tab[cmd_offs + 3]          // Command ID
+  78          
+  79          
+  80          typedef enum {
+  81              CMD_SAVE_PAR_FLAG = 1,
+  82              CMD_SPACE_SKIP    = 2,
+  83              CMD_NEW_COMMAND   = 4,
+  84          };
+  85          
+  86          
+  87          typedef struct {
+  88                  uchar *cmd_tab;            // pointer na tabulku prikazu
+  89                  uint   cmd_tab_size;       // velikost tabulky prikazu
+  90          
+  91                  uchar *cmd_par_buf;        // parameter buffer pointer
+  92                  uchar  cmd_par_buf_ix;     // parameter index
+  93                  uchar  cmd_par_cnt;        // paramaters count 
+  94                  uchar  cmd_par_buf_size;   // velikost bufferu parametru
+  95          
+  96                  uint   cmd_offset;         // index zacatku aktualniho prikazu
+  97                  uint   cmd_ix;             // index v prikazu (pozice od offsetu)
+  98                  
+  99                  uchar  cmd_state;          // CMD_PAR_SAVE | CMD_SPACE_SKIP | CMD_NEW_COMMAND
+ 100          } t_cmd;
+ 101          
+ 102          
+ 103          t_cmd TARGET_XMEM cmd[CMD_SESSIONS_COUNT];
+ 104          
+ 105          
+ 106          //----------------------------------------------------------------------------------
+ 107          
+ 108          
+ 109          
+ 110          
+ 111          // +-----------------------------------------+
+ 112          // |    Vrati ukazatel na n-ty parametr      |
+ 113          // +-----------------------------------------+
+ 114          char *cmd_getpar(uchar session_id, uchar index)
+ 115          {
+ 116   1          uchar i;
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 3   
+
+ 117   1          uchar ct;
+ 118   1          
+ 119   1          i=1;                                                               // Nastav index prvniho paramatru
+ 120   1          ct=0;                                                              // Nuluj citac parametru
+ 121   1          while(ct!=index)                                                   // Citej parametry dokud neni cislo
+             - parametru stejne jako index
+ 122   1          {
+ 123   2              if(ct == index) break;                                           // Pokud je cislo parametru stejn
+             -e jako index, parametr nalezen, konci
+ 124   2      
+ 125   2              if(!cmd[session_id].cmd_par_buf[i])
+ 126   2                   ct++;                                                       // Pokud je nalezena #0, pokracuj
+             - s dalsim parametrem
+ 127   2              i++;                                                             // Inc index v bufferu
+ 128   2          }
+ 129   1          return(cmd[session_id].cmd_par_buf + i);                             // Vrat skutecnou adresu parametr
+             -u
+ 130   1      }
+ 131          
+ 132          
+ 133          // +-----------------------------------------------+
+ 134          // | Vrati cislo zkonvertovane z n-teho parametru  |
+ 135          // +-----------------------------------------------+
+ 136          int cmd_getparnum(uchar session_id, uchar index, uchar omez)
+ 137          {
+ 138   1          uchar Num[5];
+ 139   1          uchar IxNum,IxPar;
+ 140   1          uint  DestInt;
+ 141   1          uint  Nasob;
+ 142   1          uchar Ch;
+ 143   1          bit   number_flag;
+ 144   1          
+ 145   1          for(IxNum=0; IxNum<5; IxNum++)
+ 146   1              Num[IxNum]=0;       // Nuluj buffer
+ 147   1          
+ 148   1          // Nacti cislice do bufferu
+ 149   1          IxNum = 0;
+ 150   1          IxPar = 0;
+ 151   1          number_flag = 0;
+ 152   1          
+ 153   1          if(cmd_getpar(session_id, index)[0] == '-')
+ 154   1              number_flag = 1;
+ 155   1          
+ 156   1          while(IxNum < 5)                                   // 5 cislic (Dec Int)
+ 157   1          {
+ 158   2              if(Ch = cmd_getpar(session_id, index)[IxPar])
+ 159   2              {
+ 160   3                  if(!str_is_num(Ch))
+ 161   3                  {
+ 162   4                      IxPar++;
+ 163   4                  }
+ 164   3                  else
+ 165   3                  {
+ 166   4                      Num[IxNum]=Ch; IxNum++; IxPar++;
+ 167   4                  }
+ 168   3              }
+ 169   2              else
+ 170   2                  break;    
+ 171   2          }
+ 172   1      
+ 173   1          // IxNum...PocetCislic
+ 174   1          if((omez) && (omez < IxNum)) IxNum = omez;  // Omezeni poctu cislic
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 4   
+
+ 175   1      
+ 176   1          // Vypocitej integer ze znaku v parametru
+ 177   1          Nasob = 1;                          // Nastav pocatecniho nasobitele
+ 178   1          DestInt = 0;                        // Nuluj vysledne cislo
+ 179   1          while(IxNum)
+ 180   1          {
+ 181   2              DestInt += (Num[IxNum-1]-'0') * Nasob; // pocitej
+ 182   2              Nasob *= 10;
+ 183   2              IxNum--;
+ 184   2          }
+ 185   1      
+ 186   1          if(number_flag)              // pokud nastaven flag zaporneho cisla
+ 187   1              DestInt = -DestInt;          // nastav flag
+ 188   1      
+ 189   1          return(DestInt);
+ 190   1      }
+ 191          
+ 192          
+ 193          // +------------------------+
+ 194          // | Vrati pocet parametru  |
+ 195          // +------------------------+
+ 196          char cmd_par_count(uchar session_id)
+ 197          {
+ 198   1          return(cmd[session_id].cmd_par_cnt);
+ 199   1      }
+ 200          
+ 201          
+ 202          // +----------------------------------------------------------+
+ 203          // | Vrati stav ukladani parametru pro specifikovanou session |
+ 204          // +----------------------------------------------------------+
+ 205          #if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+              bit cmd_get_par_save_state(uchar session_id)
+              {
+                  if(cmd[session_id].cmd_par_buf_ix)
+                      return(1);
+                  else
+                      return(0);
+              }
+              #endif
+ 214          
+ 215          
+ 216          // +--------------------------------------------------------------------------+
+ 217          // | Vraci 1, pokud je detekovan prikaz nebo dokud neni plny buffer parametru |
+ 218          // +--------------------------------------------------------------------------+
+ 219          #if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+              bit cmd_char_print_allowed(uchar session_id)
+              {
+                  if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)
+                      return(1);
+                  else
+                      return(0);
+              }
+              #endif
+ 228          
+ 229          
+ 230          // +--------------------------------------------------------+
+ 231          // | Porovnava znak v get_char se znaky v tabulce cmd_tab   |
+ 232          // +--------------------------------------------------------+
+ 233          char cmd_detect(uchar session_id, uchar get_char)
+ 234          {
+ 235   1          uchar out;
+ 236   1          uchar curr_char;
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 5   
+
+ 237   1          int   node_ix;
+ 238   1      
+ 239   1          #define SEPARATOR    '@'
+ 240   1      
+ 241   1          // Predchozi znak pro porovnani
+ 242   1          #define PREV_CHAR    cmd[session_id].cmd_tab[cmd[session_id].cmd_ix + cmd[session_id].cmd_offset + 3 -
+             - NODE_IX]
+ 243   1      
+ 244   1          // Aktualni znak pro porovnani
+ 245   1          #define CURR_CHAR    cmd[session_id].cmd_tab[cmd[session_id].cmd_ix + cmd[session_id].cmd_offset + 4 -
+             - NODE_IX]
+ 246   1      
+ 247   1          // Node index
+ 248   1          #define NODE_IX      cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 1]
+ 249   1      
+ 250   1          // Next node index
+ 251   1          #define NEXT_NODE    cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 2]
+ 252   1      
+ 253   1          // Node value
+ 254   1          #define NODE_VALUE   cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 3]
+ 255   1          
+ 256   1      
+ 257   1          if(cmd[session_id].cmd_state & CMD_SAVE_PAR_FLAG)              // pokud je aktivni ukladani parametru
+ 258   1          {
+ 259   2              switch(get_char)
+ 260   2              {
+ 261   3                  case '/':                                              // Znaky pro dalsi parametr
+ 262   3                  case '.':
+ 263   3                  case ':':
+ 264   3                  case ',':
+ 265   3                  case ' ':
+ 266   3                      if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)           // pokud j
+             -e v bufferu misto
+ 267   3                      {
+ 268   4                          if(!(cmd[session_id].cmd_state & CMD_SPACE_SKIP)) 
+ 269   4                          {
+ 270   5                              cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;        // zapis k
+             -onec aktualniho parametru
+ 271   5                              cmd[session_id].cmd_par_buf_ix++;                                       // posun i
+             -ndex
+ 272   5                              cmd[session_id].cmd_par_cnt++;                                          // inc par
+             - count
+ 273   5                          }
+ 274   4      
+ 275   4                          if(get_char == ' ')  
+ 276   4                              cmd[session_id].cmd_state |= CMD_SPACE_SKIP;              // aktivace vynechani me
+             -zer
+ 277   4                          else
+ 278   4                              cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;             // deaktivace vynechani 
+             -mezer
+ 279   4                      }
+ 280   3                      break;                                 
+ 281   3      
+ 282   3                  case ';':                                              // Konec ukladani parametru
+ 283   3                  case '@':
+ 284   3                  case '*':
+ 285   3                  case '#':
+ 286   3                  //case '>':
+ 287   3                  case  10:
+ 288   3                  case  13:   
+ 289   3                      if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)  // pokud je v buffe
+             -ru misto
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 6   
+
+ 290   3                      {
+ 291   4                          cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;   // zapis konec aktu
+             -alniho parametru
+ 292   4                      }
+ 293   3      
+ 294   3                      cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_size - 1] = 0;  // zapis konec buf
+             -feru pro jistotu
+ 295   3      
+ 296   3                      cmd[session_id].cmd_state &= ~CMD_SAVE_PAR_FLAG;        // deaktivace modu zachytavani par
+             -ametru
+ 297   3      
+ 298   3                      out = NODE_VALUE;                                       // set output value
+ 299   3                      cmd[session_id].cmd_offset = 0;                         // reset command offset
+ 300   3                      
+ 301   3                      // pozn. zde neresetovat index parametru, 
+ 302   3                      // bud nastavit priznak a resetovat pozdeji nebo zkopirovat                               
+             -           
+ 303   3                      // cmd_par_buf_ix = 0;                                // reset command index
+ 304   3                      cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+ 305   3      
+ 306   3                      return(out);
+ 307   3                      break;
+ 308   3      
+ 309   3                  case 8:                                                // backspace
+ 310   3                      if(cmd[session_id].cmd_par_buf_ix)
+ 311   3                      {
+ 312   4                          cmd[session_id].cmd_par_buf_ix--;
+ 313   4                          cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;
+ 314   4                      }
+ 315   3                      break;
+ 316   3      
+ 317   3                  case '"': break;                                         // Uvozovky nezapisovat
+ 318   3      
+ 319   3                  default: 
+ 320   3                      if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)    // pokud je v buf
+             -feru misto
+ 321   3                      {
+ 322   4                          cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = get_char;              /
+             -/ zapis aktualni znak
+ 323   4                          cmd[session_id].cmd_par_buf_ix++; 
+ 324   4                      }
+ 325   3                      else
+ 326   3                      {
+ 327   4                          cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_size - 1] = 0;     // zapis ko
+             -nec parametru
+ 328   4                      }
+ 329   3      
+ 330   3                      cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;       // deaktivuj flag vynechani mezer
+ 331   3                      break;
+ 332   3              }
+ 333   2          }
+ 334   1          else
+ 335   1          {
+ 336   2              COMPARE:
+ 337   2      
+ 338   2              if(cmd[session_id].cmd_state & CMD_NEW_COMMAND)                  // if new command expected
+ 339   2              {
+ 340   3                  cmd[session_id].cmd_state &= ~CMD_NEW_COMMAND;               // reset flag of new command
+ 341   3                  cmd[session_id].cmd_par_buf_ix = 0;                          // reset parameter index
+ 342   3                  cmd[session_id].cmd_ix = 0;                                  // reset indexu prikazu
+ 343   3              }
+ 344   2      
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 7   
+
+ 345   2              get_char = str_up_char(get_char);         // convert char to UpCase
+ 346   2          
+ 347   2              curr_char = CURR_CHAR;                    // get current char
+ 348   2              if(curr_char == SEPARATOR)
+ 349   2              {
+ 350   3                  // Pokud nalezen separator, pricti a aktualnimu offsetu aktualni index
+ 351   3                  cmd[session_id].cmd_offset += cmd[session_id].cmd_ix;
+ 352   3              }
+ 353   2          
+ 354   2              curr_char = CURR_CHAR;                // get current char
+ 355   2              if(curr_char == get_char)          
+ 356   2              {
+ 357   3                  // pokud jsou znaky shodne
+ 358   3          
+ 359   3                  CHAR_OK:
+ 360   3                  //printf("CMD %c == %c\r\n", CURR_CHAR, get_char);
+ 361   3          
+ 362   3                  cmd[session_id].cmd_ix++;                 // posun lokalni index v prikazu
+ 363   3          
+ 364   3                  curr_char = CURR_CHAR;                    // get current char
+ 365   3                  if(curr_char == '@')                      // test konce prikazu
+ 366   3                  {                              
+ 367   4                      // Prikaz je kompletni
+ 368   4              
+ 369   4                      if(PREV_CHAR == '>')
+ 370   4                      {
+ 371   5                          // ukonci detekci prikazu a vratit ID prikazu
+ 372   5      
+ 373   5                          out = NODE_VALUE;                                       // set output value
+ 374   5                          cmd[session_id].cmd_offset = 0;                         // reset command offset
+ 375   5                          
+ 376   5                          // pozn. zde neresetovat index parametru, 
+ 377   5                          // bud nastavit priznak a resetovat pozdeji nebo zkopirovat                           
+             -               
+ 378   5                          // cmd_par_buf_ix = 0;                                // reset command index
+ 379   5                          cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+ 380   5          
+ 381   5                          return(out);
+ 382   5                      }
+ 383   4                      else
+ 384   4                      {
+ 385   5                          //aktivuj ukladani parametru
+ 386   5      
+ 387   5                          str_reset_buffer(cmd[session_id].cmd_par_buf, cmd[session_id].cmd_par_buf_size);      
+             -// clear buffer
+ 388   5          
+ 389   5                          cmd[session_id].cmd_par_cnt = 0;                                      // reset poctu p
+             -arametru
+ 390   5                          cmd[session_id].cmd_par_buf_ix  = 0;                                  // start offset
+ 391   5          
+ 392   5                          cmd[session_id].cmd_state |= CMD_SAVE_PAR_FLAG;                       // aktivuj uklad
+             -ani parametru
+ 393   5                          cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;                         // deaktivuj vyn
+             -echani mezer
+ 394   5          
+ 395   5                          return(0);
+ 396   5                      }
+ 397   4                  }
+ 398   3              }
+ 399   2              else
+ 400   2              {
+ 401   3                  // pokud nejsou znaky shodne, nacti dalsi nod, porovnej lokalni index,
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 8   
+
+ 402   3                  // pokud je lokalni index > index nodu, prikaz s timto znakem neexistuje, restartuj detekci
+ 403   3                  // pokud je lokalni index < index nodu, hledej dalsi nod
+ 404   3                  // pokud jsou indexy shodne, nastav hodnotu offsetu nodu jako aktualni a opakuj detekci
+ 405   3          
+ 406   3                  //printf("CMD %c != %c\r\n", CURR_CHAR, get_char);
+ 407   3          
+ 408   3                  FIND_NEXT_NODE:
+ 409   3          
+ 410   3                  if(NEXT_NODE)
+ 411   3                  {
+ 412   4                      cmd[session_id].cmd_offset += NEXT_NODE;
+ 413   4                      //printf("nextnode:%i\r\n", (int) cmd_offset);
+ 414   4              
+ 415   4                      if(cmd[session_id].cmd_ix < NODE_IX)                      
+ 416   4                      {
+ 417   5                          // novy uzel ma mensi index, pokracuj v hledani dalsiho uzle
+ 418   5                          //printf("cmd_ix[%i] < NODE_IX[%i], find next node\r\n", (int) cmd_ix, (int) NODE_IX);
+ 419   5              
+ 420   5                          goto FIND_NEXT_NODE;
+ 421   5                      }
+ 422   4              
+ 423   4                      node_ix = NODE_IX;
+ 424   4                      if(cmd[session_id].cmd_ix > node_ix)                      
+ 425   4                      {
+ 426   5                          // novy uzel ma vetsi index, tedy nebyl nalezen shodny index
+ 427   5                          // ukonci hledani, spust znovu test shodnosti od nuloveho indexu s aktualnim znakem
+ 428   5                          //printf("cmd_ix[%i] > NODE_IX[%i], reset\r\n", (int) cmd_ix, (int) NODE_IX);
+ 429   5              
+ 430   5                          cmd[session_id].cmd_ix = 0;
+ 431   5                          cmd[session_id].cmd_offset = 0;
+ 432   5              
+ 433   5                          goto COMPARE;
+ 434   5      
+ 435   5                          // POZN: zde neukoncovat funkci (testovano)
+ 436   5                      }
+ 437   4              
+ 438   4                      
+ 439   4                      node_ix = NODE_IX;
+ 440   4                      if(cmd[session_id].cmd_ix == node_ix)                      
+ 441   4                      {
+ 442   5                          // pokracuj v testu shodnosti
+ 443   5                          //printf("Next node: ix=%i, ofs=%i, val=%i\r\n", cmd_ix, cmd_offset, (int) NODE_VALUE)
+             -;
+ 444   5              
+ 445   5                          curr_char = CURR_CHAR;                    // get current char
+ 446   5                          if(curr_char == get_char)
+ 447   5                              goto CHAR_OK;
+ 448   5                          else
+ 449   5                              goto FIND_NEXT_NODE;
+ 450   5                      }
+ 451   4                  }
+ 452   3                  else
+ 453   3                  {
+ 454   4                      //printf("Not next node, reset\r\n");
+ 455   4          
+ 456   4                      cmd[session_id].cmd_ix = 0;
+ 457   4                      cmd[session_id].cmd_offset = 0;
+ 458   4          
+ 459   4                      //goto COMPARE;
+ 460   4                  }
+ 461   3              }
+ 462   2          }
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 9   
+
+ 463   1          return(0);
+ 464   1      }
+ 465          
+ 466          
+ 467          // +---------------------------------------------------+
+ 468          // | Kontrola udaju s session a test integrity tabulky |
+ 469          // +---------------------------------------------------+
+ 470          // | Vraci:                                            |
+ 471          // | 1 = session je ok                                 |
+ 472          // +---------------------------------------------------+
+ 473          bit cmd_validate_test(uchar session_id)
+ 474          {
+ 475   1          uint cmd_offs;
+ 476   1      
+ 477   1          if(!cmd[session_id].cmd_tab_size)                   // pokud nenastavena velikost tabulky prikazu
+ 478   1              return(0);
+ 479   1      
+ 480   1          if(!cmd[session_id].cmd_tab)                        // pokud nenastaven pointer na tabulku prikazu
+ 481   1              return(0);                                      
+ 482   1         
+ 483   1          if(!cmd[session_id].cmd_par_buf)                   // pokud nenastaven pointer na buffer parametru
+ 484   1              return(0);
+ 485   1      
+ 486   1          if(!cmd[session_id].cmd_par_buf_size)              // pokud nenastavena velikost bufferu parametru
+ 487   1              return(0);                                      
+ 488   1         
+ 489   1          cmd_offs = 0;
+ 490   1          
+ 491   1          while(1)
+ 492   1          {
+ 493   2              if(CMD_NODE_ID != CMD_SEPARATOR)                    // pokud nesedi ID zacatku noveho prikazu
+ 494   2                  return(0);
+ 495   2      
+ 496   2              if((!CMD_NODE_IX) && (!CMD_NEXT_NODE))         // pokud nalezen konec tabulky prikazu
+ 497   2                  return(1);
+ 498   2      
+ 499   2              if(cmd_offs > cmd[session_id].cmd_tab_size)      // pokud prekrocen konec tabulky
+ 500   2                  return(0);
+ 501   2      
+ 502   2              cmd_offs += CMD_NEXT_NODE;                      // jdi na dalsi prikaz
+ 503   2          }
+ 504   1      }
+ 505          
+ 506          
+ 507          // +------------------------------------------------------+
+ 508          // | Vypis vsech prikazu specifikovane session_id         |
+ 509          // +------------------------------------------------------+
+ 510          //#if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+ 511          void cmd_command_list(uchar session_id)
+ 512          {
+ 513   1          uint  TARGET_SMEM  cmd_offs;
+ 514   1          char  TARGET_SMEM  cmd_buf[15];
+ 515   1          uchar TARGET_SMEM  cmd_buf_ix;
+ 516   1          char  TARGET_SMEM  cmd_char;
+ 517   1      
+ 518   1          cmd_offs = 0;
+ 519   1          
+ 520   1          printf(BR" id  command"BR"-------------"BR, (uint) cmd[session_id].cmd_tab[cmd_offs + 3], cmd_buf);
+ 521   1          while(1)
+ 522   1          {
+ 523   2              if(CMD_NODE_ID != CMD_SEPARATOR)                    // pokud nesedi ID zacatku noveho prikazu
+ 524   2                  return;
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 10  
+
+ 525   2      
+ 526   2              if((!CMD_NODE_IX) && (!CMD_NEXT_NODE))              // pokud nalezen konec tabulky prikazu
+ 527   2                  return;
+ 528   2      
+ 529   2              if(cmd_offs > cmd[session_id].cmd_tab_size)         // pokud prekrocen konec tabulky
+ 530   2                  return;
+ 531   2      
+ 532   2              for(cmd_buf_ix = 0; cmd_buf_ix < sizeof(cmd_buf); cmd_buf_ix++)
+ 533   2              {
+ 534   3                  cmd_char = cmd[session_id].cmd_tab[cmd_offs + 4 + cmd_buf_ix];
+ 535   3                  
+ 536   3                  if((cmd_char == SEPARATOR) ||
+ 537   3                     ((cmd_buf_ix + CMD_NODE_IX) == sizeof(cmd_buf)-1))
+ 538   3                  {
+ 539   4                      cmd_buf[cmd_buf_ix + CMD_NODE_IX] = 0;
+ 540   4                      break;
+ 541   4                  }
+ 542   3      
+ 543   3                  cmd_buf[cmd_buf_ix + CMD_NODE_IX] = cmd_char;
+ 544   3              }
+ 545   2                                                           
+ 546   2              printf(" %.2i: %s"BR, (uint) CMD_ID, cmd_buf);
+ 547   2      
+ 548   2              cmd_offs += CMD_NEXT_NODE;                      // jdi na dalsi prikaz
+ 549   2          }
+ 550   1      }
+ 551          //#endif
+ 552          
+ 553          
+ 554          // +------------------------------------------------------+
+ 555          // | Inicializace a zapis parametru pro spec. session     |
+ 556          // +------------------------------------------------------+
+ 557          // | Po inicializace doporucuji provest cmd_validate_test |
+ 558          // +------------------------------------------------------+
+ 559          void cmd_init(uchar session_id, char *cmd_tab, int tab_size, char *par_buf, char par_buf_size)
+ 560          {
+ 561   1          cmd[session_id].cmd_offset = 0;
+ 562   1          cmd[session_id].cmd_ix = 0;
+ 563   1          cmd[session_id].cmd_par_buf = par_buf;
+ 564   1          cmd[session_id].cmd_par_buf_size = par_buf_size;
+ 565   1          cmd[session_id].cmd_tab = cmd_tab;
+ 566   1          cmd[session_id].cmd_tab_size = tab_size;
+ 567   1      
+ 568   1          cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;
+ 569   1          cmd[session_id].cmd_state &= ~CMD_SAVE_PAR_FLAG;
+ 570   1          cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+ 571   1      }
+ 572          
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 11  
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _cmd_getpar (BEGIN)
+                                           ; SOURCE LINE # 114
+0000 8F00        R     MOV     session_id,R7
+;---- Variable 'index' assigned to Register 'R5' ----
+                                           ; SOURCE LINE # 115
+                                           ; SOURCE LINE # 119
+;---- Variable 'i' assigned to Register 'R7' ----
+0002 7F01              MOV     R7,#01H
+                                           ; SOURCE LINE # 120
+;---- Variable 'ct' assigned to Register 'R6' ----
+0004 E4                CLR     A
+0005 FE                MOV     R6,A
+0006         ?C0001:
+                                           ; SOURCE LINE # 121
+0006 EE                MOV     A,R6
+0007 6D                XRL     A,R5
+0008 6028              JZ      ?C0002
+                                           ; SOURCE LINE # 122
+                                           ; SOURCE LINE # 123
+000A EE                MOV     A,R6
+000B 6D                XRL     A,R5
+000C 6024              JZ      ?C0002
+000E         ?C0003:
+                                           ; SOURCE LINE # 125
+000E E500        R     MOV     A,session_id
+0010 C4                SWAP    A
+0011 54F0              ANL     A,#0F0H
+0013 2400        R     ADD     A,#LOW cmd+05H
+0015 F582              MOV     DPL,A
+0017 E4                CLR     A
+0018 3400        R     ADDC    A,#HIGH cmd+05H
+001A F583              MOV     DPH,A
+001C E0                MOVX    A,@DPTR
+001D FB                MOV     R3,A
+001E A3                INC     DPTR
+001F E0                MOVX    A,@DPTR
+0020 FA                MOV     R2,A
+0021 A3                INC     DPTR
+0022 E0                MOVX    A,@DPTR
+0023 F9                MOV     R1,A
+0024 8F82              MOV     DPL,R7
+0026 758300            MOV     DPH,#00H
+0029 120000      E     LCALL   ?C?CLDOPTR
+002C 7001              JNZ     ?C0004
+                                           ; SOURCE LINE # 126
+002E 0E                INC     R6
+002F         ?C0004:
+                                           ; SOURCE LINE # 127
+002F 0F                INC     R7
+                                           ; SOURCE LINE # 128
+0030 80D4              SJMP    ?C0001
+0032         ?C0002:
+                                           ; SOURCE LINE # 129
+0032 E500        R     MOV     A,session_id
+0034 C4                SWAP    A
+0035 54F0              ANL     A,#0F0H
+0037 2400        R     ADD     A,#LOW cmd+05H
+0039 F582              MOV     DPL,A
+003B E4                CLR     A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 12  
+
+003C 3400        R     ADDC    A,#HIGH cmd+05H
+003E F583              MOV     DPH,A
+0040 E0                MOVX    A,@DPTR
+0041 FB                MOV     R3,A
+0042 A3                INC     DPTR
+0043 E0                MOVX    A,@DPTR
+0044 FA                MOV     R2,A
+0045 A3                INC     DPTR
+0046 E0                MOVX    A,@DPTR
+0047 7E00              MOV     R6,#00H
+0049 2F                ADD     A,R7
+004A F9                MOV     R1,A
+004B EE                MOV     A,R6
+004C 3A                ADDC    A,R2
+004D FA                MOV     R2,A
+                                           ; SOURCE LINE # 130
+004E         ?C0005:
+004E 22                RET     
+             ; FUNCTION _cmd_getpar (END)
+
+             ; FUNCTION _cmd_getparnum (BEGIN)
+                                           ; SOURCE LINE # 136
+0000 8F00        R     MOV     session_id,R7
+0002 8D00        R     MOV     index,R5
+0004 8B00        R     MOV     omez,R3
+                                           ; SOURCE LINE # 137
+                                           ; SOURCE LINE # 145
+0006 E4                CLR     A
+0007 F500        R     MOV     IxNum,A
+0009         ?C0006:
+                                           ; SOURCE LINE # 146
+0009 7400        R     MOV     A,#LOW Num
+000B 2500        R     ADD     A,IxNum
+000D F8                MOV     R0,A
+000E E4                CLR     A
+000F F6                MOV     @R0,A
+0010 0500        R     INC     IxNum
+0012 E500        R     MOV     A,IxNum
+0014 B405F2            CJNE    A,#05H,?C0006
+0017         ?C0007:
+                                           ; SOURCE LINE # 149
+0017 E4                CLR     A
+0018 F500        R     MOV     IxNum,A
+                                           ; SOURCE LINE # 150
+001A F500        R     MOV     IxPar,A
+                                           ; SOURCE LINE # 151
+001C C200        R     CLR     number_flag
+                                           ; SOURCE LINE # 153
+001E AD00        R     MOV     R5,index
+0020 AF00        R     MOV     R7,session_id
+0022 120000      R     LCALL   _cmd_getpar
+0025 120000      E     LCALL   ?C?CLDPTR
+0028 B42D02            CJNE    A,#02DH,?C0010
+                                           ; SOURCE LINE # 154
+002B D200        R     SETB    number_flag
+002D         ?C0010:
+                                           ; SOURCE LINE # 156
+002D E500        R     MOV     A,IxNum
+002F C3                CLR     C
+0030 9405              SUBB    A,#05H
+0032 502F              JNC     ?C0011
+                                           ; SOURCE LINE # 157
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 13  
+
+                                           ; SOURCE LINE # 158
+0034 AD00        R     MOV     R5,index
+0036 AF00        R     MOV     R7,session_id
+0038 120000      R     LCALL   _cmd_getpar
+003B 7E00              MOV     R6,#00H
+003D E9                MOV     A,R1
+003E 2500        R     ADD     A,IxPar
+0040 F9                MOV     R1,A
+0041 EE                MOV     A,R6
+0042 3A                ADDC    A,R2
+0043 FA                MOV     R2,A
+0044 120000      E     LCALL   ?C?CLDPTR
+0047 F500        R     MOV     Ch,A
+0049 6018              JZ      ?C0011
+                                           ; SOURCE LINE # 159
+                                           ; SOURCE LINE # 160
+004B FF                MOV     R7,A
+004C 120000      E     LCALL   _str_is_num
+004F EF                MOV     A,R7
+0050 7004              JNZ     ?C0013
+                                           ; SOURCE LINE # 161
+                                           ; SOURCE LINE # 162
+0052 0500        R     INC     IxPar
+                                           ; SOURCE LINE # 163
+0054 80D7              SJMP    ?C0010
+0056         ?C0013:
+                                           ; SOURCE LINE # 165
+                                           ; SOURCE LINE # 166
+0056 7400        R     MOV     A,#LOW Num
+0058 2500        R     ADD     A,IxNum
+005A F8                MOV     R0,A
+005B A600        R     MOV     @R0,Ch
+005D 0500        R     INC     IxNum
+005F 0500        R     INC     IxPar
+                                           ; SOURCE LINE # 167
+                                           ; SOURCE LINE # 168
+0061 80CA              SJMP    ?C0010
+                                           ; SOURCE LINE # 170
+                                           ; SOURCE LINE # 171
+0063         ?C0011:
+                                           ; SOURCE LINE # 174
+0063 E500        R     MOV     A,omez
+0065 6008              JZ      ?C0016
+0067 C3                CLR     C
+0068 9500        R     SUBB    A,IxNum
+006A 5003              JNC     ?C0016
+006C 850000      R     MOV     IxNum,omez
+006F         ?C0016:
+                                           ; SOURCE LINE # 177
+;---- Variable 'Nasob' assigned to Register 'R2/R3' ----
+006F 7B01              MOV     R3,#01H
+0071 7A00              MOV     R2,#00H
+                                           ; SOURCE LINE # 178
+;---- Variable 'DestInt' assigned to Register 'DPTR' ----
+0073 900000            MOV     DPTR,#00H
+0076         ?C0017:
+                                           ; SOURCE LINE # 179
+0076 E500        R     MOV     A,IxNum
+0078 602F              JZ      ?C0018
+                                           ; SOURCE LINE # 180
+                                           ; SOURCE LINE # 181
+007A 2400        R     ADD     A,#LOW Num+0FFFFH
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 14  
+
+007C F8                MOV     R0,A
+007D E6                MOV     A,@R0
+007E 24D0              ADD     A,#0D0H
+0080 FF                MOV     R7,A
+0081 E4                CLR     A
+0082 34FF              ADDC    A,#0FFH
+0084 FE                MOV     R6,A
+0085 AD03              MOV     R5,AR3
+0087 AC02              MOV     R4,AR2
+0089 120000      E     LCALL   ?C?IMUL
+008C EF                MOV     A,R7
+008D 2582              ADD     A,DPL
+008F F582              MOV     DPL,A
+0091 EE                MOV     A,R6
+0092 3583              ADDC    A,DPH
+0094 F583              MOV     DPH,A
+                                           ; SOURCE LINE # 182
+0096 7C00              MOV     R4,#00H
+0098 7D0A              MOV     R5,#0AH
+009A AF03              MOV     R7,AR3
+009C AE02              MOV     R6,AR2
+009E 120000      E     LCALL   ?C?IMUL
+00A1 AA06              MOV     R2,AR6
+00A3 AB07              MOV     R3,AR7
+                                           ; SOURCE LINE # 183
+00A5 1500        R     DEC     IxNum
+                                           ; SOURCE LINE # 184
+00A7 80CD              SJMP    ?C0017
+00A9         ?C0018:
+                                           ; SOURCE LINE # 186
+00A9 30000B            JNB     number_flag,?C0019
+                                           ; SOURCE LINE # 187
+00AC C3                CLR     C
+00AD E4                CLR     A
+00AE 9582              SUBB    A,DPL
+00B0 F582              MOV     DPL,A
+00B2 E4                CLR     A
+00B3 9583              SUBB    A,DPH
+00B5 F583              MOV     DPH,A
+00B7         ?C0019:
+                                           ; SOURCE LINE # 189
+00B7 AE83              MOV     R6,DPH
+00B9 AF82              MOV     R7,DPL
+                                           ; SOURCE LINE # 190
+00BB         ?C0020:
+00BB 22                RET     
+             ; FUNCTION _cmd_getparnum (END)
+
+             ; FUNCTION _cmd_par_count (BEGIN)
+                                           ; SOURCE LINE # 196
+;---- Variable 'session_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 197
+                                           ; SOURCE LINE # 198
+0000 EF                MOV     A,R7
+0001 C4                SWAP    A
+0002 54F0              ANL     A,#0F0H
+0004 2400        R     ADD     A,#LOW cmd+09H
+0006 F582              MOV     DPL,A
+0008 E4                CLR     A
+0009 3400        R     ADDC    A,#HIGH cmd+09H
+000B F583              MOV     DPH,A
+000D E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 15  
+
+000E FF                MOV     R7,A
+                                           ; SOURCE LINE # 199
+000F         ?C0021:
+000F 22                RET     
+             ; FUNCTION _cmd_par_count (END)
+
+             ; FUNCTION _cmd_detect (BEGIN)
+                                           ; SOURCE LINE # 233
+0000 8F00        R     MOV     session_id,R7
+0002 8D00        R     MOV     get_char,R5
+                                           ; SOURCE LINE # 234
+                                           ; SOURCE LINE # 257
+0004 EF                MOV     A,R7
+0005 C4                SWAP    A
+0006 54F0              ANL     A,#0F0H
+0008 2400        R     ADD     A,#LOW cmd+0FH
+000A F582              MOV     DPL,A
+000C E4                CLR     A
+000D 3400        R     ADDC    A,#HIGH cmd+0FH
+000F F583              MOV     DPH,A
+0011 E0                MOVX    A,@DPTR
+0012 FF                MOV     R7,A
+0013 20E003            JB      ACC.0,$ + 6H
+0016 020000      R     LJMP    COMPARE
+                                           ; SOURCE LINE # 258
+                                           ; SOURCE LINE # 259
+0019 E500        R     MOV     A,get_char
+001B 120000      E     LCALL   ?C?CCASE
+001E 0000        R     DW      ?C0041
+0020 08                DB      08H
+0021 0000        R     DW      ?C0038
+0023 0A                DB      0AH
+0024 0000        R     DW      ?C0038
+0026 0D                DB      0DH
+0027 0000        R     DW      ?C0028
+0029 20                DB      020H
+002A 0000        R     DW      ?C0047
+002C 22                DB      022H
+002D 0000        R     DW      ?C0038
+002F 23                DB      023H
+0030 0000        R     DW      ?C0038
+0032 2A                DB      02AH
+0033 0000        R     DW      ?C0028
+0035 2C                DB      02CH
+0036 0000        R     DW      ?C0028
+0038 2E                DB      02EH
+0039 0000        R     DW      ?C0028
+003B 2F                DB      02FH
+003C 0000        R     DW      ?C0028
+003E 3A                DB      03AH
+003F 0000        R     DW      ?C0038
+0041 3B                DB      03BH
+0042 0000        R     DW      ?C0038
+0044 40                DB      040H
+0045 0000              DW      00H
+0047 0000        R     DW      ?C0044
+                                           ; SOURCE LINE # 260
+                                           ; SOURCE LINE # 261
+                                           ; SOURCE LINE # 262
+                                           ; SOURCE LINE # 263
+                                           ; SOURCE LINE # 264
+                                           ; SOURCE LINE # 265
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 16  
+
+0049         ?C0028:
+                                           ; SOURCE LINE # 266
+0049 E500        R     MOV     A,session_id
+004B C4                SWAP    A
+004C 54F0              ANL     A,#0F0H
+004E 2400        R     ADD     A,#LOW cmd+0AH
+0050 F582              MOV     DPL,A
+0052 E4                CLR     A
+0053 3400        R     ADDC    A,#HIGH cmd+0AH
+0055 F583              MOV     DPH,A
+0057 E0                MOVX    A,@DPTR
+0058 FE                MOV     R6,A
+0059 E500        R     MOV     A,session_id
+005B C4                SWAP    A
+005C 54F0              ANL     A,#0F0H
+005E 2400        R     ADD     A,#LOW cmd+08H
+0060 F582              MOV     DPL,A
+0062 E4                CLR     A
+0063 3400        R     ADDC    A,#HIGH cmd+08H
+0065 F583              MOV     DPH,A
+0067 E0                MOVX    A,@DPTR
+0068 FD                MOV     R5,A
+0069 C3                CLR     C
+006A 9E                SUBB    A,R6
+006B 4003              JC      $ + 5H
+006D 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 267
+                                           ; SOURCE LINE # 268
+0070 EF                MOV     A,R7
+0071 20E141            JB      ACC.1,?C0030
+                                           ; SOURCE LINE # 269
+                                           ; SOURCE LINE # 270
+0074 E500        R     MOV     A,session_id
+0076 C4                SWAP    A
+0077 54F0              ANL     A,#0F0H
+0079 2400        R     ADD     A,#LOW cmd+05H
+007B F582              MOV     DPL,A
+007D E4                CLR     A
+007E 3400        R     ADDC    A,#HIGH cmd+05H
+0080 F583              MOV     DPH,A
+0082 E0                MOVX    A,@DPTR
+0083 FB                MOV     R3,A
+0084 A3                INC     DPTR
+0085 E0                MOVX    A,@DPTR
+0086 FA                MOV     R2,A
+0087 A3                INC     DPTR
+0088 E0                MOVX    A,@DPTR
+0089 F9                MOV     R1,A
+008A 8D82              MOV     DPL,R5
+008C 758300            MOV     DPH,#00H
+008F E4                CLR     A
+0090 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 271
+0093 E500        R     MOV     A,session_id
+0095 C4                SWAP    A
+0096 54F0              ANL     A,#0F0H
+0098 2400        R     ADD     A,#LOW cmd+08H
+009A F582              MOV     DPL,A
+009C E4                CLR     A
+009D 3400        R     ADDC    A,#HIGH cmd+08H
+009F F583              MOV     DPH,A
+00A1 E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 17  
+
+00A2 04                INC     A
+00A3 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 272
+00A4 E500        R     MOV     A,session_id
+00A6 C4                SWAP    A
+00A7 54F0              ANL     A,#0F0H
+00A9 2400        R     ADD     A,#LOW cmd+09H
+00AB F582              MOV     DPL,A
+00AD E4                CLR     A
+00AE 3400        R     ADDC    A,#HIGH cmd+09H
+00B0 F583              MOV     DPH,A
+00B2 E0                MOVX    A,@DPTR
+00B3 04                INC     A
+00B4 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 273
+00B5         ?C0030:
+                                           ; SOURCE LINE # 275
+00B5 E500        R     MOV     A,get_char
+00B7 B42015            CJNE    A,#020H,?C0031
+                                           ; SOURCE LINE # 276
+00BA E500        R     MOV     A,session_id
+00BC C4                SWAP    A
+00BD 54F0              ANL     A,#0F0H
+00BF 2400        R     ADD     A,#LOW cmd+0FH
+00C1 F582              MOV     DPL,A
+00C3 E4                CLR     A
+00C4 3400        R     ADDC    A,#HIGH cmd+0FH
+00C6 F583              MOV     DPH,A
+00C8 E0                MOVX    A,@DPTR
+00C9 4402              ORL     A,#02H
+00CB F0                MOVX    @DPTR,A
+00CC 020000      R     LJMP    ?C0047
+00CF         ?C0031:
+                                           ; SOURCE LINE # 278
+                                           ; SOURCE LINE # 279
+                                           ; SOURCE LINE # 280
+00CF 020000      R     LJMP    ?C0088
+                                           ; SOURCE LINE # 282
+                                           ; SOURCE LINE # 283
+                                           ; SOURCE LINE # 284
+                                           ; SOURCE LINE # 285
+                                           ; SOURCE LINE # 287
+                                           ; SOURCE LINE # 288
+00D2         ?C0038:
+                                           ; SOURCE LINE # 289
+00D2 E500        R     MOV     A,session_id
+00D4 C4                SWAP    A
+00D5 54F0              ANL     A,#0F0H
+00D7 2400        R     ADD     A,#LOW cmd+0AH
+00D9 F582              MOV     DPL,A
+00DB E4                CLR     A
+00DC 3400        R     ADDC    A,#HIGH cmd+0AH
+00DE F583              MOV     DPH,A
+00E0 E0                MOVX    A,@DPTR
+00E1 FF                MOV     R7,A
+00E2 E500        R     MOV     A,session_id
+00E4 C4                SWAP    A
+00E5 54F0              ANL     A,#0F0H
+00E7 2400        R     ADD     A,#LOW cmd+08H
+00E9 F582              MOV     DPL,A
+00EB E4                CLR     A
+00EC 3400        R     ADDC    A,#HIGH cmd+08H
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 18  
+
+00EE F583              MOV     DPH,A
+00F0 E0                MOVX    A,@DPTR
+00F1 FE                MOV     R6,A
+00F2 C3                CLR     C
+00F3 9F                SUBB    A,R7
+00F4 501F              JNC     ?C0039
+                                           ; SOURCE LINE # 290
+                                           ; SOURCE LINE # 291
+00F6 E500        R     MOV     A,session_id
+00F8 C4                SWAP    A
+00F9 54F0              ANL     A,#0F0H
+00FB 2400        R     ADD     A,#LOW cmd+05H
+00FD F582              MOV     DPL,A
+00FF E4                CLR     A
+0100 3400        R     ADDC    A,#HIGH cmd+05H
+0102 F583              MOV     DPH,A
+0104 E0                MOVX    A,@DPTR
+0105 FB                MOV     R3,A
+0106 A3                INC     DPTR
+0107 E0                MOVX    A,@DPTR
+0108 FA                MOV     R2,A
+0109 A3                INC     DPTR
+010A E0                MOVX    A,@DPTR
+010B F9                MOV     R1,A
+010C 8E82              MOV     DPL,R6
+010E 758300            MOV     DPH,#00H
+0111 E4                CLR     A
+0112 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 292
+0115         ?C0039:
+                                           ; SOURCE LINE # 294
+0115 E500        R     MOV     A,session_id
+0117 C4                SWAP    A
+0118 54F0              ANL     A,#0F0H
+011A 2400        R     ADD     A,#LOW cmd+0AH
+011C F582              MOV     DPL,A
+011E E4                CLR     A
+011F 3400        R     ADDC    A,#HIGH cmd+0AH
+0121 F583              MOV     DPH,A
+0123 E0                MOVX    A,@DPTR
+0124 24FF              ADD     A,#0FFH
+0126 FF                MOV     R7,A
+0127 E4                CLR     A
+0128 34FF              ADDC    A,#0FFH
+012A FE                MOV     R6,A
+012B E500        R     MOV     A,session_id
+012D C4                SWAP    A
+012E 54F0              ANL     A,#0F0H
+0130 2400        R     ADD     A,#LOW cmd+05H
+0132 F582              MOV     DPL,A
+0134 E4                CLR     A
+0135 3400        R     ADDC    A,#HIGH cmd+05H
+0137 F583              MOV     DPH,A
+0139 E0                MOVX    A,@DPTR
+013A FB                MOV     R3,A
+013B A3                INC     DPTR
+013C E0                MOVX    A,@DPTR
+013D FA                MOV     R2,A
+013E A3                INC     DPTR
+013F E0                MOVX    A,@DPTR
+0140 F9                MOV     R1,A
+0141 8F82              MOV     DPL,R7
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 19  
+
+0143 8E83              MOV     DPH,R6
+0145 E4                CLR     A
+0146 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 296
+0149 E500        R     MOV     A,session_id
+014B C4                SWAP    A
+014C 54F0              ANL     A,#0F0H
+014E 2400        R     ADD     A,#LOW cmd+0FH
+0150 F582              MOV     DPL,A
+0152 E4                CLR     A
+0153 3400        R     ADDC    A,#HIGH cmd+0FH
+0155 F583              MOV     DPH,A
+0157 E0                MOVX    A,@DPTR
+0158 54FE              ANL     A,#0FEH
+015A F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 298
+015B E500        R     MOV     A,session_id
+015D C4                SWAP    A
+015E 54F0              ANL     A,#0F0H
+0160 2400        R     ADD     A,#LOW cmd
+0162 F582              MOV     DPL,A
+0164 E4                CLR     A
+0165 3400        R     ADDC    A,#HIGH cmd
+0167 F583              MOV     DPH,A
+0169 E0                MOVX    A,@DPTR
+016A FB                MOV     R3,A
+016B A3                INC     DPTR
+016C E0                MOVX    A,@DPTR
+016D FA                MOV     R2,A
+016E A3                INC     DPTR
+016F E0                MOVX    A,@DPTR
+0170 F9                MOV     R1,A
+                                           ; SOURCE LINE # 299
+                                           ; SOURCE LINE # 304
+                                           ; SOURCE LINE # 306
+0171 020000      R     LJMP    ?C0089
+                                           ; SOURCE LINE # 307
+                                           ; SOURCE LINE # 309
+0174         ?C0041:
+                                           ; SOURCE LINE # 310
+0174 E500        R     MOV     A,session_id
+0176 C4                SWAP    A
+0177 54F0              ANL     A,#0F0H
+0179 2400        R     ADD     A,#LOW cmd+08H
+017B F582              MOV     DPL,A
+017D E4                CLR     A
+017E 3400        R     ADDC    A,#HIGH cmd+08H
+0180 F583              MOV     DPH,A
+0182 E0                MOVX    A,@DPTR
+0183 7003              JNZ     $ + 5H
+0185 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 311
+                                           ; SOURCE LINE # 312
+0188 E500        R     MOV     A,session_id
+018A C4                SWAP    A
+018B 54F0              ANL     A,#0F0H
+018D 2400        R     ADD     A,#LOW cmd+08H
+018F F582              MOV     DPL,A
+0191 E4                CLR     A
+0192 3400        R     ADDC    A,#HIGH cmd+08H
+0194 F583              MOV     DPH,A
+0196 E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 20  
+
+0197 14                DEC     A
+0198 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 313
+0199 E500        R     MOV     A,session_id
+019B C4                SWAP    A
+019C 54F0              ANL     A,#0F0H
+019E 2400        R     ADD     A,#LOW cmd+05H
+01A0 F582              MOV     DPL,A
+01A2 E4                CLR     A
+01A3 3400        R     ADDC    A,#HIGH cmd+05H
+01A5 F583              MOV     DPH,A
+01A7 E0                MOVX    A,@DPTR
+01A8 FB                MOV     R3,A
+01A9 A3                INC     DPTR
+01AA E0                MOVX    A,@DPTR
+01AB FA                MOV     R2,A
+01AC A3                INC     DPTR
+01AD E0                MOVX    A,@DPTR
+01AE F9                MOV     R1,A
+01AF E500        R     MOV     A,session_id
+01B1 C4                SWAP    A
+01B2 54F0              ANL     A,#0F0H
+01B4 2400        R     ADD     A,#LOW cmd+08H
+01B6 F582              MOV     DPL,A
+01B8 E4                CLR     A
+01B9 3400        R     ADDC    A,#HIGH cmd+08H
+01BB F583              MOV     DPH,A
+01BD E0                MOVX    A,@DPTR
+01BE F582              MOV     DPL,A
+01C0 758300            MOV     DPH,#00H
+01C3 E4                CLR     A
+01C4 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 314
+                                           ; SOURCE LINE # 315
+01C7 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 317
+                                           ; SOURCE LINE # 319
+01CA         ?C0044:
+                                           ; SOURCE LINE # 320
+01CA E500        R     MOV     A,session_id
+01CC C4                SWAP    A
+01CD 54F0              ANL     A,#0F0H
+01CF 2400        R     ADD     A,#LOW cmd+0AH
+01D1 F582              MOV     DPL,A
+01D3 E4                CLR     A
+01D4 3400        R     ADDC    A,#HIGH cmd+0AH
+01D6 F583              MOV     DPH,A
+01D8 E0                MOVX    A,@DPTR
+01D9 FF                MOV     R7,A
+01DA E500        R     MOV     A,session_id
+01DC C4                SWAP    A
+01DD 54F0              ANL     A,#0F0H
+01DF 2400        R     ADD     A,#LOW cmd+08H
+01E1 F582              MOV     DPL,A
+01E3 E4                CLR     A
+01E4 3400        R     ADDC    A,#HIGH cmd+08H
+01E6 F583              MOV     DPH,A
+01E8 E0                MOVX    A,@DPTR
+01E9 FE                MOV     R6,A
+01EA C3                CLR     C
+01EB 9F                SUBB    A,R7
+01EC 5033              JNC     ?C0045
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 21  
+
+                                           ; SOURCE LINE # 321
+                                           ; SOURCE LINE # 322
+01EE E500        R     MOV     A,session_id
+01F0 C4                SWAP    A
+01F1 54F0              ANL     A,#0F0H
+01F3 2400        R     ADD     A,#LOW cmd+05H
+01F5 F582              MOV     DPL,A
+01F7 E4                CLR     A
+01F8 3400        R     ADDC    A,#HIGH cmd+05H
+01FA F583              MOV     DPH,A
+01FC E0                MOVX    A,@DPTR
+01FD FB                MOV     R3,A
+01FE A3                INC     DPTR
+01FF E0                MOVX    A,@DPTR
+0200 FA                MOV     R2,A
+0201 A3                INC     DPTR
+0202 E0                MOVX    A,@DPTR
+0203 F9                MOV     R1,A
+0204 8E82              MOV     DPL,R6
+0206 758300            MOV     DPH,#00H
+0209 E500        R     MOV     A,get_char
+020B 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 323
+020E E500        R     MOV     A,session_id
+0210 C4                SWAP    A
+0211 54F0              ANL     A,#0F0H
+0213 2400        R     ADD     A,#LOW cmd+08H
+0215 F582              MOV     DPL,A
+0217 E4                CLR     A
+0218 3400        R     ADDC    A,#HIGH cmd+08H
+021A F583              MOV     DPH,A
+021C E0                MOVX    A,@DPTR
+021D 04                INC     A
+021E F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 324
+021F 8026              SJMP    ?C0046
+0221         ?C0045:
+                                           ; SOURCE LINE # 326
+                                           ; SOURCE LINE # 327
+0221 EF                MOV     A,R7
+0222 24FF              ADD     A,#0FFH
+0224 FF                MOV     R7,A
+0225 E4                CLR     A
+0226 34FF              ADDC    A,#0FFH
+0228 FE                MOV     R6,A
+0229 E500        R     MOV     A,session_id
+022B C4                SWAP    A
+022C 54F0              ANL     A,#0F0H
+022E 2400        R     ADD     A,#LOW cmd+05H
+0230 F582              MOV     DPL,A
+0232 E4                CLR     A
+0233 3400        R     ADDC    A,#HIGH cmd+05H
+0235 F583              MOV     DPH,A
+0237 E0                MOVX    A,@DPTR
+0238 FB                MOV     R3,A
+0239 A3                INC     DPTR
+023A E0                MOVX    A,@DPTR
+023B FA                MOV     R2,A
+023C A3                INC     DPTR
+023D E0                MOVX    A,@DPTR
+023E F9                MOV     R1,A
+023F 8F82              MOV     DPL,R7
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 22  
+
+0241 8E83              MOV     DPH,R6
+0243 E4                CLR     A
+0244 120000      E     LCALL   ?C?CSTOPTR
+                                           ; SOURCE LINE # 328
+0247         ?C0046:
+                                           ; SOURCE LINE # 330
+0247         ?C0088:
+0247 E500        R     MOV     A,session_id
+0249 C4                SWAP    A
+024A 54F0              ANL     A,#0F0H
+024C 2400        R     ADD     A,#LOW cmd+0FH
+024E F582              MOV     DPL,A
+0250 E4                CLR     A
+0251 3400        R     ADDC    A,#HIGH cmd+0FH
+0253 F583              MOV     DPH,A
+0255 E0                MOVX    A,@DPTR
+0256 54FD              ANL     A,#0FDH
+0258 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 331
+0259 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 332
+                                           ; SOURCE LINE # 333
+                                           ; SOURCE LINE # 335
+                                           ; SOURCE LINE # 336
+025C         COMPARE:
+                                           ; SOURCE LINE # 338
+025C E500        R     MOV     A,session_id
+025E C4                SWAP    A
+025F 54F0              ANL     A,#0F0H
+0261 2400        R     ADD     A,#LOW cmd+0FH
+0263 F582              MOV     DPL,A
+0265 E4                CLR     A
+0266 3400        R     ADDC    A,#HIGH cmd+0FH
+0268 F583              MOV     DPH,A
+026A E0                MOVX    A,@DPTR
+026B FF                MOV     R7,A
+026C 30E234            JNB     ACC.2,?C0049
+                                           ; SOURCE LINE # 339
+                                           ; SOURCE LINE # 340
+026F E500        R     MOV     A,session_id
+0271 C4                SWAP    A
+0272 54F0              ANL     A,#0F0H
+0274 2400        R     ADD     A,#LOW cmd+0FH
+0276 F582              MOV     DPL,A
+0278 E4                CLR     A
+0279 3400        R     ADDC    A,#HIGH cmd+0FH
+027B F583              MOV     DPH,A
+027D EF                MOV     A,R7
+027E 54FB              ANL     A,#0FBH
+0280 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 341
+0281 E500        R     MOV     A,session_id
+0283 C4                SWAP    A
+0284 54F0              ANL     A,#0F0H
+0286 2400        R     ADD     A,#LOW cmd+08H
+0288 F582              MOV     DPL,A
+028A E4                CLR     A
+028B 3400        R     ADDC    A,#HIGH cmd+08H
+028D F583              MOV     DPH,A
+028F E4                CLR     A
+0290 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 342
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 23  
+
+0291 E500        R     MOV     A,session_id
+0293 C4                SWAP    A
+0294 54F0              ANL     A,#0F0H
+0296 2400        R     ADD     A,#LOW cmd+0DH
+0298 F582              MOV     DPL,A
+029A E4                CLR     A
+029B 3400        R     ADDC    A,#HIGH cmd+0DH
+029D F583              MOV     DPH,A
+029F E4                CLR     A
+02A0 F0                MOVX    @DPTR,A
+02A1 A3                INC     DPTR
+02A2 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 343
+02A3         ?C0049:
+                                           ; SOURCE LINE # 345
+02A3 AF00        R     MOV     R7,get_char
+02A5 120000      E     LCALL   _str_up_char
+02A8 8F00        R     MOV     get_char,R7
+                                           ; SOURCE LINE # 347
+02AA E500        R     MOV     A,session_id
+02AC C4                SWAP    A
+02AD 54F0              ANL     A,#0F0H
+02AF 2400        R     ADD     A,#LOW cmd
+02B1 F582              MOV     DPL,A
+02B3 E4                CLR     A
+02B4 3400        R     ADDC    A,#HIGH cmd
+02B6 F583              MOV     DPH,A
+02B8 E0                MOVX    A,@DPTR
+02B9 FB                MOV     R3,A
+02BA A3                INC     DPTR
+02BB E0                MOVX    A,@DPTR
+02BC FA                MOV     R2,A
+02BD A3                INC     DPTR
+02BE E0                MOVX    A,@DPTR
+02BF F9                MOV     R1,A
+02C0 E500        R     MOV     A,session_id
+02C2 C4                SWAP    A
+02C3 54F0              ANL     A,#0F0H
+02C5 2400        R     ADD     A,#LOW cmd+0BH
+02C7 F582              MOV     DPL,A
+02C9 E4                CLR     A
+02CA 3400        R     ADDC    A,#HIGH cmd+0BH
+02CC F583              MOV     DPH,A
+02CE E0                MOVX    A,@DPTR
+02CF FE                MOV     R6,A
+02D0 A3                INC     DPTR
+02D1 E0                MOVX    A,@DPTR
+02D2 F582              MOV     DPL,A
+02D4 8E83              MOV     DPH,R6
+02D6 A3                INC     DPTR
+02D7 120000      E     LCALL   ?C?CLDOPTR
+02DA FF                MOV     R7,A
+02DB E500        R     MOV     A,session_id
+02DD C4                SWAP    A
+02DE 54F0              ANL     A,#0F0H
+02E0 2400        R     ADD     A,#LOW cmd+0BH
+02E2 F582              MOV     DPL,A
+02E4 E4                CLR     A
+02E5 3400        R     ADDC    A,#HIGH cmd+0BH
+02E7 F583              MOV     DPH,A
+02E9 E0                MOVX    A,@DPTR
+02EA FC                MOV     R4,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 24  
+
+02EB A3                INC     DPTR
+02EC E0                MOVX    A,@DPTR
+02ED FD                MOV     R5,A
+02EE E500        R     MOV     A,session_id
+02F0 C4                SWAP    A
+02F1 54F0              ANL     A,#0F0H
+02F3 2400        R     ADD     A,#LOW cmd+0DH
+02F5 F582              MOV     DPL,A
+02F7 E4                CLR     A
+02F8 3400        R     ADDC    A,#HIGH cmd+0DH
+02FA F583              MOV     DPH,A
+02FC E0                MOVX    A,@DPTR
+02FD FA                MOV     R2,A
+02FE A3                INC     DPTR
+02FF E0                MOVX    A,@DPTR
+0300 2D                ADD     A,R5
+0301 FD                MOV     R5,A
+0302 EA                MOV     A,R2
+0303 3C                ADDC    A,R4
+0304 CD                XCH     A,R5
+0305 2404              ADD     A,#04H
+0307 CD                XCH     A,R5
+0308 3400              ADDC    A,#00H
+030A CD                XCH     A,R5
+030B C3                CLR     C
+030C 9F                SUBB    A,R7
+030D FF                MOV     R7,A
+030E ED                MOV     A,R5
+030F 9400              SUBB    A,#00H
+0311 FE                MOV     R6,A
+0312 E500        R     MOV     A,session_id
+0314 C4                SWAP    A
+0315 54F0              ANL     A,#0F0H
+0317 2400        R     ADD     A,#LOW cmd
+0319 F582              MOV     DPL,A
+031B E4                CLR     A
+031C 3400        R     ADDC    A,#HIGH cmd
+031E F583              MOV     DPH,A
+0320 E0                MOVX    A,@DPTR
+0321 FB                MOV     R3,A
+0322 A3                INC     DPTR
+0323 E0                MOVX    A,@DPTR
+0324 FA                MOV     R2,A
+0325 A3                INC     DPTR
+0326 E0                MOVX    A,@DPTR
+0327 F9                MOV     R1,A
+0328 8F82              MOV     DPL,R7
+032A 8E83              MOV     DPH,R6
+032C 120000      E     LCALL   ?C?CLDOPTR
+032F F500        R     MOV     curr_char,A
+                                           ; SOURCE LINE # 348
+0331 B44027            CJNE    A,#040H,?C0050
+                                           ; SOURCE LINE # 349
+                                           ; SOURCE LINE # 351
+0334 E500        R     MOV     A,session_id
+0336 C4                SWAP    A
+0337 54F0              ANL     A,#0F0H
+0339 2400        R     ADD     A,#LOW cmd+0DH
+033B F582              MOV     DPL,A
+033D E4                CLR     A
+033E 3400        R     ADDC    A,#HIGH cmd+0DH
+0340 F583              MOV     DPH,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 25  
+
+0342 E0                MOVX    A,@DPTR
+0343 FE                MOV     R6,A
+0344 A3                INC     DPTR
+0345 E0                MOVX    A,@DPTR
+0346 FF                MOV     R7,A
+0347 E500        R     MOV     A,session_id
+0349 C4                SWAP    A
+034A 54F0              ANL     A,#0F0H
+034C 2400        R     ADD     A,#LOW cmd+0BH
+034E F582              MOV     DPL,A
+0350 E4                CLR     A
+0351 3400        R     ADDC    A,#HIGH cmd+0BH
+0353 F583              MOV     DPH,A
+0355 EE                MOV     A,R6
+0356 8FF0              MOV     B,R7
+0358 120000      E     LCALL   ?C?IILDX
+                                           ; SOURCE LINE # 352
+035B         ?C0050:
+                                           ; SOURCE LINE # 354
+035B E500        R     MOV     A,session_id
+035D C4                SWAP    A
+035E 54F0              ANL     A,#0F0H
+0360 2400        R     ADD     A,#LOW cmd
+0362 F582              MOV     DPL,A
+0364 E4                CLR     A
+0365 3400        R     ADDC    A,#HIGH cmd
+0367 F583              MOV     DPH,A
+0369 E0                MOVX    A,@DPTR
+036A FB                MOV     R3,A
+036B A3                INC     DPTR
+036C E0                MOVX    A,@DPTR
+036D FA                MOV     R2,A
+036E A3                INC     DPTR
+036F E0                MOVX    A,@DPTR
+0370 F9                MOV     R1,A
+0371 E500        R     MOV     A,session_id
+0373 C4                SWAP    A
+0374 54F0              ANL     A,#0F0H
+0376 2400        R     ADD     A,#LOW cmd+0BH
+0378 F582              MOV     DPL,A
+037A E4                CLR     A
+037B 3400        R     ADDC    A,#HIGH cmd+0BH
+037D F583              MOV     DPH,A
+037F E0                MOVX    A,@DPTR
+0380 FE                MOV     R6,A
+0381 A3                INC     DPTR
+0382 E0                MOVX    A,@DPTR
+0383 F582              MOV     DPL,A
+0385 8E83              MOV     DPH,R6
+0387 A3                INC     DPTR
+0388 120000      E     LCALL   ?C?CLDOPTR
+038B FF                MOV     R7,A
+038C E500        R     MOV     A,session_id
+038E C4                SWAP    A
+038F 54F0              ANL     A,#0F0H
+0391 2400        R     ADD     A,#LOW cmd+0BH
+0393 F582              MOV     DPL,A
+0395 E4                CLR     A
+0396 3400        R     ADDC    A,#HIGH cmd+0BH
+0398 F583              MOV     DPH,A
+039A E0                MOVX    A,@DPTR
+039B FC                MOV     R4,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 26  
+
+039C A3                INC     DPTR
+039D E0                MOVX    A,@DPTR
+039E FD                MOV     R5,A
+039F E500        R     MOV     A,session_id
+03A1 C4                SWAP    A
+03A2 54F0              ANL     A,#0F0H
+03A4 2400        R     ADD     A,#LOW cmd+0DH
+03A6 F582              MOV     DPL,A
+03A8 E4                CLR     A
+03A9 3400        R     ADDC    A,#HIGH cmd+0DH
+03AB F583              MOV     DPH,A
+03AD E0                MOVX    A,@DPTR
+03AE FA                MOV     R2,A
+03AF A3                INC     DPTR
+03B0 E0                MOVX    A,@DPTR
+03B1 2D                ADD     A,R5
+03B2 FD                MOV     R5,A
+03B3 EA                MOV     A,R2
+03B4 3C                ADDC    A,R4
+03B5 CD                XCH     A,R5
+03B6 2404              ADD     A,#04H
+03B8 CD                XCH     A,R5
+03B9 3400              ADDC    A,#00H
+03BB CD                XCH     A,R5
+03BC C3                CLR     C
+03BD 9F                SUBB    A,R7
+03BE FF                MOV     R7,A
+03BF ED                MOV     A,R5
+03C0 9400              SUBB    A,#00H
+03C2 FE                MOV     R6,A
+03C3 E500        R     MOV     A,session_id
+03C5 C4                SWAP    A
+03C6 54F0              ANL     A,#0F0H
+03C8 2400        R     ADD     A,#LOW cmd
+03CA F582              MOV     DPL,A
+03CC E4                CLR     A
+03CD 3400        R     ADDC    A,#HIGH cmd
+03CF F583              MOV     DPH,A
+03D1 E0                MOVX    A,@DPTR
+03D2 FB                MOV     R3,A
+03D3 A3                INC     DPTR
+03D4 E0                MOVX    A,@DPTR
+03D5 FA                MOV     R2,A
+03D6 A3                INC     DPTR
+03D7 E0                MOVX    A,@DPTR
+03D8 F9                MOV     R1,A
+03D9 8F82              MOV     DPL,R7
+03DB 8E83              MOV     DPH,R6
+03DD 120000      E     LCALL   ?C?CLDOPTR
+03E0 F500        R     MOV     curr_char,A
+                                           ; SOURCE LINE # 355
+03E2 6500        R     XRL     A,get_char
+03E4 6003              JZ      $ + 5H
+03E6 020000      R     LJMP    FIND_NEXT_NODE
+                                           ; SOURCE LINE # 356
+                                           ; SOURCE LINE # 359
+03E9         CHAR_OK:
+                                           ; SOURCE LINE # 362
+03E9 E500        R     MOV     A,session_id
+03EB C4                SWAP    A
+03EC 54F0              ANL     A,#0F0H
+03EE 2400        R     ADD     A,#LOW cmd+0DH
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 27  
+
+03F0 F582              MOV     DPL,A
+03F2 E4                CLR     A
+03F3 3400        R     ADDC    A,#HIGH cmd+0DH
+03F5 F583              MOV     DPH,A
+03F7 E4                CLR     A
+03F8 75F001            MOV     B,#01H
+03FB 120000      E     LCALL   ?C?IILDX
+                                           ; SOURCE LINE # 364
+03FE E500        R     MOV     A,session_id
+0400 C4                SWAP    A
+0401 54F0              ANL     A,#0F0H
+0403 2400        R     ADD     A,#LOW cmd
+0405 F582              MOV     DPL,A
+0407 E4                CLR     A
+0408 3400        R     ADDC    A,#HIGH cmd
+040A F583              MOV     DPH,A
+040C E0                MOVX    A,@DPTR
+040D FB                MOV     R3,A
+040E A3                INC     DPTR
+040F E0                MOVX    A,@DPTR
+0410 FA                MOV     R2,A
+0411 A3                INC     DPTR
+0412 E0                MOVX    A,@DPTR
+0413 F9                MOV     R1,A
+0414 E500        R     MOV     A,session_id
+0416 C4                SWAP    A
+0417 54F0              ANL     A,#0F0H
+0419 2400        R     ADD     A,#LOW cmd+0BH
+041B F582              MOV     DPL,A
+041D E4                CLR     A
+041E 3400        R     ADDC    A,#HIGH cmd+0BH
+0420 F583              MOV     DPH,A
+0422 E0                MOVX    A,@DPTR
+0423 FE                MOV     R6,A
+0424 A3                INC     DPTR
+0425 E0                MOVX    A,@DPTR
+0426 F582              MOV     DPL,A
+0428 8E83              MOV     DPH,R6
+042A A3                INC     DPTR
+042B 120000      E     LCALL   ?C?CLDOPTR
+042E FF                MOV     R7,A
+042F E500        R     MOV     A,session_id
+0431 C4                SWAP    A
+0432 54F0              ANL     A,#0F0H
+0434 2400        R     ADD     A,#LOW cmd+0BH
+0436 F582              MOV     DPL,A
+0438 E4                CLR     A
+0439 3400        R     ADDC    A,#HIGH cmd+0BH
+043B F583              MOV     DPH,A
+043D E0                MOVX    A,@DPTR
+043E FC                MOV     R4,A
+043F A3                INC     DPTR
+0440 E0                MOVX    A,@DPTR
+0441 FD                MOV     R5,A
+0442 E500        R     MOV     A,session_id
+0444 C4                SWAP    A
+0445 54F0              ANL     A,#0F0H
+0447 2400        R     ADD     A,#LOW cmd+0DH
+0449 F582              MOV     DPL,A
+044B E4                CLR     A
+044C 3400        R     ADDC    A,#HIGH cmd+0DH
+044E F583              MOV     DPH,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 28  
+
+0450 E0                MOVX    A,@DPTR
+0451 FA                MOV     R2,A
+0452 A3                INC     DPTR
+0453 E0                MOVX    A,@DPTR
+0454 2D                ADD     A,R5
+0455 FD                MOV     R5,A
+0456 EA                MOV     A,R2
+0457 3C                ADDC    A,R4
+0458 CD                XCH     A,R5
+0459 2404              ADD     A,#04H
+045B CD                XCH     A,R5
+045C 3400              ADDC    A,#00H
+045E CD                XCH     A,R5
+045F C3                CLR     C
+0460 9F                SUBB    A,R7
+0461 FF                MOV     R7,A
+0462 ED                MOV     A,R5
+0463 9400              SUBB    A,#00H
+0465 FE                MOV     R6,A
+0466 E500        R     MOV     A,session_id
+0468 C4                SWAP    A
+0469 54F0              ANL     A,#0F0H
+046B 2400        R     ADD     A,#LOW cmd
+046D F582              MOV     DPL,A
+046F E4                CLR     A
+0470 3400        R     ADDC    A,#HIGH cmd
+0472 F583              MOV     DPH,A
+0474 E0                MOVX    A,@DPTR
+0475 FB                MOV     R3,A
+0476 A3                INC     DPTR
+0477 E0                MOVX    A,@DPTR
+0478 FA                MOV     R2,A
+0479 A3                INC     DPTR
+047A E0                MOVX    A,@DPTR
+047B F9                MOV     R1,A
+047C 8F82              MOV     DPL,R7
+047E 8E83              MOV     DPH,R6
+0480 120000      E     LCALL   ?C?CLDOPTR
+0483 F500        R     MOV     curr_char,A
+                                           ; SOURCE LINE # 365
+0485 6440              XRL     A,#040H
+0487 6003              JZ      $ + 5H
+0489 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 366
+                                           ; SOURCE LINE # 369
+048C E500        R     MOV     A,session_id
+048E C4                SWAP    A
+048F 54F0              ANL     A,#0F0H
+0491 2400        R     ADD     A,#LOW cmd+0BH
+0493 F582              MOV     DPL,A
+0495 E4                CLR     A
+0496 3400        R     ADDC    A,#HIGH cmd+0BH
+0498 F583              MOV     DPH,A
+049A E0                MOVX    A,@DPTR
+049B FE                MOV     R6,A
+049C A3                INC     DPTR
+049D E0                MOVX    A,@DPTR
+049E F582              MOV     DPL,A
+04A0 8E83              MOV     DPH,R6
+04A2 A3                INC     DPTR
+04A3 120000      E     LCALL   ?C?CLDOPTR
+04A6 FF                MOV     R7,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 29  
+
+04A7 E500        R     MOV     A,session_id
+04A9 C4                SWAP    A
+04AA 54F0              ANL     A,#0F0H
+04AC 2400        R     ADD     A,#LOW cmd+0BH
+04AE F582              MOV     DPL,A
+04B0 E4                CLR     A
+04B1 3400        R     ADDC    A,#HIGH cmd+0BH
+04B3 F583              MOV     DPH,A
+04B5 E0                MOVX    A,@DPTR
+04B6 FC                MOV     R4,A
+04B7 A3                INC     DPTR
+04B8 E0                MOVX    A,@DPTR
+04B9 FD                MOV     R5,A
+04BA E500        R     MOV     A,session_id
+04BC C4                SWAP    A
+04BD 54F0              ANL     A,#0F0H
+04BF 2400        R     ADD     A,#LOW cmd+0DH
+04C1 F582              MOV     DPL,A
+04C3 E4                CLR     A
+04C4 3400        R     ADDC    A,#HIGH cmd+0DH
+04C6 F583              MOV     DPH,A
+04C8 E0                MOVX    A,@DPTR
+04C9 FA                MOV     R2,A
+04CA A3                INC     DPTR
+04CB E0                MOVX    A,@DPTR
+04CC 2D                ADD     A,R5
+04CD FD                MOV     R5,A
+04CE EA                MOV     A,R2
+04CF 3C                ADDC    A,R4
+04D0 CD                XCH     A,R5
+04D1 2403              ADD     A,#03H
+04D3 CD                XCH     A,R5
+04D4 3400              ADDC    A,#00H
+04D6 CD                XCH     A,R5
+04D7 C3                CLR     C
+04D8 9F                SUBB    A,R7
+04D9 FF                MOV     R7,A
+04DA ED                MOV     A,R5
+04DB 9400              SUBB    A,#00H
+04DD FE                MOV     R6,A
+04DE E500        R     MOV     A,session_id
+04E0 C4                SWAP    A
+04E1 54F0              ANL     A,#0F0H
+04E3 2400        R     ADD     A,#LOW cmd
+04E5 F582              MOV     DPL,A
+04E7 E4                CLR     A
+04E8 3400        R     ADDC    A,#HIGH cmd
+04EA F583              MOV     DPH,A
+04EC E0                MOVX    A,@DPTR
+04ED FB                MOV     R3,A
+04EE A3                INC     DPTR
+04EF E0                MOVX    A,@DPTR
+04F0 FA                MOV     R2,A
+04F1 A3                INC     DPTR
+04F2 E0                MOVX    A,@DPTR
+04F3 F9                MOV     R1,A
+04F4 8F82              MOV     DPL,R7
+04F6 8E83              MOV     DPH,R6
+04F8 120000      E     LCALL   ?C?CLDOPTR
+04FB 643E              XRL     A,#03EH
+04FD 7045              JNZ     ?C0054
+                                           ; SOURCE LINE # 370
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 30  
+
+                                           ; SOURCE LINE # 373
+04FF         ?C0089:
+04FF E500        R     MOV     A,session_id
+0501 C4                SWAP    A
+0502 54F0              ANL     A,#0F0H
+0504 2400        R     ADD     A,#LOW cmd+0BH
+0506 F582              MOV     DPL,A
+0508 E4                CLR     A
+0509 3400        R     ADDC    A,#HIGH cmd+0BH
+050B F583              MOV     DPH,A
+050D E0                MOVX    A,@DPTR
+050E FE                MOV     R6,A
+050F A3                INC     DPTR
+0510 E0                MOVX    A,@DPTR
+0511 F582              MOV     DPL,A
+0513 8E83              MOV     DPH,R6
+0515 A3                INC     DPTR
+0516 A3                INC     DPTR
+0517 A3                INC     DPTR
+0518 120000      E     LCALL   ?C?CLDOPTR
+051B F500        R     MOV     out,A
+                                           ; SOURCE LINE # 374
+051D E500        R     MOV     A,session_id
+051F C4                SWAP    A
+0520 54F0              ANL     A,#0F0H
+0522 2400        R     ADD     A,#LOW cmd+0BH
+0524 F582              MOV     DPL,A
+0526 E4                CLR     A
+0527 3400        R     ADDC    A,#HIGH cmd+0BH
+0529 F583              MOV     DPH,A
+052B E4                CLR     A
+052C F0                MOVX    @DPTR,A
+052D A3                INC     DPTR
+052E F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 379
+052F E500        R     MOV     A,session_id
+0531 C4                SWAP    A
+0532 54F0              ANL     A,#0F0H
+0534 2400        R     ADD     A,#LOW cmd+0FH
+0536 F582              MOV     DPL,A
+0538 E4                CLR     A
+0539 3400        R     ADDC    A,#HIGH cmd+0FH
+053B F583              MOV     DPH,A
+053D E0                MOVX    A,@DPTR
+053E 4404              ORL     A,#04H
+0540 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 381
+0541 AF00        R     MOV     R7,out
+0543 22                RET     
+                                           ; SOURCE LINE # 382
+0544         ?C0054:
+                                           ; SOURCE LINE # 384
+                                           ; SOURCE LINE # 387
+0544 E500        R     MOV     A,session_id
+0546 C4                SWAP    A
+0547 54F0              ANL     A,#0F0H
+0549 2400        R     ADD     A,#LOW cmd+05H
+054B F582              MOV     DPL,A
+054D E4                CLR     A
+054E 3400        R     ADDC    A,#HIGH cmd+05H
+0550 F583              MOV     DPH,A
+0552 E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 31  
+
+0553 FB                MOV     R3,A
+0554 A3                INC     DPTR
+0555 E0                MOVX    A,@DPTR
+0556 FA                MOV     R2,A
+0557 A3                INC     DPTR
+0558 E0                MOVX    A,@DPTR
+0559 F9                MOV     R1,A
+055A E500        R     MOV     A,session_id
+055C C4                SWAP    A
+055D 54F0              ANL     A,#0F0H
+055F 2400        R     ADD     A,#LOW cmd+0AH
+0561 F582              MOV     DPL,A
+0563 E4                CLR     A
+0564 3400        R     ADDC    A,#HIGH cmd+0AH
+0566 F583              MOV     DPH,A
+0568 E0                MOVX    A,@DPTR
+0569 FD                MOV     R5,A
+056A 7C00              MOV     R4,#00H
+056C 120000      E     LCALL   _str_reset_buffer
+                                           ; SOURCE LINE # 389
+056F E500        R     MOV     A,session_id
+0571 C4                SWAP    A
+0572 54F0              ANL     A,#0F0H
+0574 2400        R     ADD     A,#LOW cmd+09H
+0576 F582              MOV     DPL,A
+0578 E4                CLR     A
+0579 3400        R     ADDC    A,#HIGH cmd+09H
+057B F583              MOV     DPH,A
+057D E4                CLR     A
+057E F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 390
+057F E500        R     MOV     A,session_id
+0581 C4                SWAP    A
+0582 54F0              ANL     A,#0F0H
+0584 2400        R     ADD     A,#LOW cmd+08H
+0586 F582              MOV     DPL,A
+0588 E4                CLR     A
+0589 3400        R     ADDC    A,#HIGH cmd+08H
+058B F583              MOV     DPH,A
+058D E4                CLR     A
+058E F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 392
+058F E500        R     MOV     A,session_id
+0591 C4                SWAP    A
+0592 54F0              ANL     A,#0F0H
+0594 2400        R     ADD     A,#LOW cmd+0FH
+0596 F582              MOV     DPL,A
+0598 E4                CLR     A
+0599 3400        R     ADDC    A,#HIGH cmd+0FH
+059B F583              MOV     DPH,A
+059D E0                MOVX    A,@DPTR
+059E 4401              ORL     A,#01H
+05A0 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 393
+05A1 E500        R     MOV     A,session_id
+05A3 C4                SWAP    A
+05A4 54F0              ANL     A,#0F0H
+05A6 2400        R     ADD     A,#LOW cmd+0FH
+05A8 F582              MOV     DPL,A
+05AA E4                CLR     A
+05AB 3400        R     ADDC    A,#HIGH cmd+0FH
+05AD F583              MOV     DPH,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 32  
+
+05AF E0                MOVX    A,@DPTR
+05B0 54FD              ANL     A,#0FDH
+05B2 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 395
+05B3 7F00              MOV     R7,#00H
+05B5 22                RET     
+                                           ; SOURCE LINE # 396
+                                           ; SOURCE LINE # 397
+                                           ; SOURCE LINE # 398
+                                           ; SOURCE LINE # 400
+                                           ; SOURCE LINE # 408
+05B6         FIND_NEXT_NODE:
+                                           ; SOURCE LINE # 410
+05B6 E500        R     MOV     A,session_id
+05B8 C4                SWAP    A
+05B9 54F0              ANL     A,#0F0H
+05BB 2400        R     ADD     A,#LOW cmd
+05BD F582              MOV     DPL,A
+05BF E4                CLR     A
+05C0 3400        R     ADDC    A,#HIGH cmd
+05C2 F583              MOV     DPH,A
+05C4 E0                MOVX    A,@DPTR
+05C5 FB                MOV     R3,A
+05C6 A3                INC     DPTR
+05C7 E0                MOVX    A,@DPTR
+05C8 FA                MOV     R2,A
+05C9 A3                INC     DPTR
+05CA E0                MOVX    A,@DPTR
+05CB F9                MOV     R1,A
+05CC E500        R     MOV     A,session_id
+05CE C4                SWAP    A
+05CF 54F0              ANL     A,#0F0H
+05D1 2400        R     ADD     A,#LOW cmd+0BH
+05D3 F582              MOV     DPL,A
+05D5 E4                CLR     A
+05D6 3400        R     ADDC    A,#HIGH cmd+0BH
+05D8 F583              MOV     DPH,A
+05DA E0                MOVX    A,@DPTR
+05DB FE                MOV     R6,A
+05DC A3                INC     DPTR
+05DD E0                MOVX    A,@DPTR
+05DE F582              MOV     DPL,A
+05E0 8E83              MOV     DPH,R6
+05E2 A3                INC     DPTR
+05E3 A3                INC     DPTR
+05E4 120000      E     LCALL   ?C?CLDOPTR
+05E7 FF                MOV     R7,A
+05E8 7003              JNZ     $ + 5H
+05EA 020000      R     LJMP    ?C0058
+                                           ; SOURCE LINE # 411
+                                           ; SOURCE LINE # 412
+05ED E500        R     MOV     A,session_id
+05EF C4                SWAP    A
+05F0 54F0              ANL     A,#0F0H
+05F2 2400        R     ADD     A,#LOW cmd+0BH
+05F4 F582              MOV     DPL,A
+05F6 E4                CLR     A
+05F7 3400        R     ADDC    A,#HIGH cmd+0BH
+05F9 F583              MOV     DPH,A
+05FB E4                CLR     A
+05FC 8FF0              MOV     B,R7
+05FE 120000      E     LCALL   ?C?IILDX
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 33  
+
+                                           ; SOURCE LINE # 415
+0601 E500        R     MOV     A,session_id
+0603 C4                SWAP    A
+0604 54F0              ANL     A,#0F0H
+0606 2400        R     ADD     A,#LOW cmd
+0608 F582              MOV     DPL,A
+060A E4                CLR     A
+060B 3400        R     ADDC    A,#HIGH cmd
+060D F583              MOV     DPH,A
+060F E0                MOVX    A,@DPTR
+0610 FB                MOV     R3,A
+0611 A3                INC     DPTR
+0612 E0                MOVX    A,@DPTR
+0613 FA                MOV     R2,A
+0614 A3                INC     DPTR
+0615 E0                MOVX    A,@DPTR
+0616 F9                MOV     R1,A
+0617 E500        R     MOV     A,session_id
+0619 C4                SWAP    A
+061A 54F0              ANL     A,#0F0H
+061C 2400        R     ADD     A,#LOW cmd+0BH
+061E F582              MOV     DPL,A
+0620 E4                CLR     A
+0621 3400        R     ADDC    A,#HIGH cmd+0BH
+0623 F583              MOV     DPH,A
+0625 E0                MOVX    A,@DPTR
+0626 FE                MOV     R6,A
+0627 A3                INC     DPTR
+0628 E0                MOVX    A,@DPTR
+0629 F582              MOV     DPL,A
+062B 8E83              MOV     DPH,R6
+062D A3                INC     DPTR
+062E 120000      E     LCALL   ?C?CLDOPTR
+0631 FF                MOV     R7,A
+0632 FD                MOV     R5,A
+0633 E500        R     MOV     A,session_id
+0635 C4                SWAP    A
+0636 54F0              ANL     A,#0F0H
+0638 2400        R     ADD     A,#LOW cmd+0DH
+063A F582              MOV     DPL,A
+063C E4                CLR     A
+063D 3400        R     ADDC    A,#HIGH cmd+0DH
+063F F583              MOV     DPH,A
+0641 E0                MOVX    A,@DPTR
+0642 FA                MOV     R2,A
+0643 A3                INC     DPTR
+0644 E0                MOVX    A,@DPTR
+0645 FB                MOV     R3,A
+0646 C3                CLR     C
+0647 9D                SUBB    A,R5
+0648 EA                MOV     A,R2
+0649 9400              SUBB    A,#00H
+064B 5003              JNC     $ + 5H
+064D 020000      R     LJMP    FIND_NEXT_NODE
+                                           ; SOURCE LINE # 416
+                                           ; SOURCE LINE # 420
+                                           ; SOURCE LINE # 421
+0650         ?C0059:
+                                           ; SOURCE LINE # 423
+0650 7E00              MOV     R6,#00H
+0652 8E00        R     MOV     node_ix,R6
+0654 8F00        R     MOV     node_ix+01H,R7
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 34  
+
+                                           ; SOURCE LINE # 424
+0656 D3                SETB    C
+0657 EB                MOV     A,R3
+0658 9500        R     SUBB    A,node_ix+01H
+065A EA                MOV     A,R2
+065B 9500        R     SUBB    A,node_ix
+065D 4027              JC      ?C0060
+                                           ; SOURCE LINE # 425
+                                           ; SOURCE LINE # 430
+065F E500        R     MOV     A,session_id
+0661 C4                SWAP    A
+0662 54F0              ANL     A,#0F0H
+0664 2400        R     ADD     A,#LOW cmd+0DH
+0666 F582              MOV     DPL,A
+0668 E4                CLR     A
+0669 3400        R     ADDC    A,#HIGH cmd+0DH
+066B F583              MOV     DPH,A
+066D E4                CLR     A
+066E F0                MOVX    @DPTR,A
+066F A3                INC     DPTR
+0670 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 431
+0671 E500        R     MOV     A,session_id
+0673 C4                SWAP    A
+0674 54F0              ANL     A,#0F0H
+0676 2400        R     ADD     A,#LOW cmd+0BH
+0678 F582              MOV     DPL,A
+067A E4                CLR     A
+067B 3400        R     ADDC    A,#HIGH cmd+0BH
+067D F583              MOV     DPH,A
+067F E4                CLR     A
+0680 F0                MOVX    @DPTR,A
+0681 A3                INC     DPTR
+0682 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 433
+0683 020000      R     LJMP    COMPARE
+                                           ; SOURCE LINE # 436
+0686         ?C0060:
+                                           ; SOURCE LINE # 439
+0686 8E00        R     MOV     node_ix,R6
+0688 8F00        R     MOV     node_ix+01H,R7
+                                           ; SOURCE LINE # 440
+068A E500        R     MOV     A,session_id
+068C C4                SWAP    A
+068D 54F0              ANL     A,#0F0H
+068F 2400        R     ADD     A,#LOW cmd+0DH
+0691 F582              MOV     DPL,A
+0693 E4                CLR     A
+0694 3400        R     ADDC    A,#HIGH cmd+0DH
+0696 F583              MOV     DPH,A
+0698 E0                MOVX    A,@DPTR
+0699 FE                MOV     R6,A
+069A A3                INC     DPTR
+069B E0                MOVX    A,@DPTR
+069C 6500        R     XRL     A,node_ix+01H
+069E 7003              JNZ     ?C0087
+06A0 EE                MOV     A,R6
+06A1 6500        R     XRL     A,node_ix
+06A3         ?C0087:
+06A3 6003              JZ      $ + 5H
+06A5 020000      R     LJMP    ?C0047
+                                           ; SOURCE LINE # 441
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 35  
+
+                                           ; SOURCE LINE # 445
+06A8 E500        R     MOV     A,session_id
+06AA C4                SWAP    A
+06AB 54F0              ANL     A,#0F0H
+06AD 2400        R     ADD     A,#LOW cmd
+06AF F582              MOV     DPL,A
+06B1 E4                CLR     A
+06B2 3400        R     ADDC    A,#HIGH cmd
+06B4 F583              MOV     DPH,A
+06B6 E0                MOVX    A,@DPTR
+06B7 FB                MOV     R3,A
+06B8 A3                INC     DPTR
+06B9 E0                MOVX    A,@DPTR
+06BA FA                MOV     R2,A
+06BB A3                INC     DPTR
+06BC E0                MOVX    A,@DPTR
+06BD F9                MOV     R1,A
+06BE E500        R     MOV     A,session_id
+06C0 C4                SWAP    A
+06C1 54F0              ANL     A,#0F0H
+06C3 2400        R     ADD     A,#LOW cmd+0BH
+06C5 F582              MOV     DPL,A
+06C7 E4                CLR     A
+06C8 3400        R     ADDC    A,#HIGH cmd+0BH
+06CA F583              MOV     DPH,A
+06CC E0                MOVX    A,@DPTR
+06CD FE                MOV     R6,A
+06CE A3                INC     DPTR
+06CF E0                MOVX    A,@DPTR
+06D0 F582              MOV     DPL,A
+06D2 8E83              MOV     DPH,R6
+06D4 A3                INC     DPTR
+06D5 120000      E     LCALL   ?C?CLDOPTR
+06D8 FF                MOV     R7,A
+06D9 E500        R     MOV     A,session_id
+06DB C4                SWAP    A
+06DC 54F0              ANL     A,#0F0H
+06DE 2400        R     ADD     A,#LOW cmd+0BH
+06E0 F582              MOV     DPL,A
+06E2 E4                CLR     A
+06E3 3400        R     ADDC    A,#HIGH cmd+0BH
+06E5 F583              MOV     DPH,A
+06E7 E0                MOVX    A,@DPTR
+06E8 FC                MOV     R4,A
+06E9 A3                INC     DPTR
+06EA E0                MOVX    A,@DPTR
+06EB FD                MOV     R5,A
+06EC E500        R     MOV     A,session_id
+06EE C4                SWAP    A
+06EF 54F0              ANL     A,#0F0H
+06F1 2400        R     ADD     A,#LOW cmd+0DH
+06F3 F582              MOV     DPL,A
+06F5 E4                CLR     A
+06F6 3400        R     ADDC    A,#HIGH cmd+0DH
+06F8 F583              MOV     DPH,A
+06FA E0                MOVX    A,@DPTR
+06FB FA                MOV     R2,A
+06FC A3                INC     DPTR
+06FD E0                MOVX    A,@DPTR
+06FE 2D                ADD     A,R5
+06FF FD                MOV     R5,A
+0700 EA                MOV     A,R2
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 36  
+
+0701 3C                ADDC    A,R4
+0702 CD                XCH     A,R5
+0703 2404              ADD     A,#04H
+0705 CD                XCH     A,R5
+0706 3400              ADDC    A,#00H
+0708 CD                XCH     A,R5
+0709 C3                CLR     C
+070A 9F                SUBB    A,R7
+070B FF                MOV     R7,A
+070C ED                MOV     A,R5
+070D 9400              SUBB    A,#00H
+070F FE                MOV     R6,A
+0710 E500        R     MOV     A,session_id
+0712 C4                SWAP    A
+0713 54F0              ANL     A,#0F0H
+0715 2400        R     ADD     A,#LOW cmd
+0717 F582              MOV     DPL,A
+0719 E4                CLR     A
+071A 3400        R     ADDC    A,#HIGH cmd
+071C F583              MOV     DPH,A
+071E E0                MOVX    A,@DPTR
+071F FB                MOV     R3,A
+0720 A3                INC     DPTR
+0721 E0                MOVX    A,@DPTR
+0722 FA                MOV     R2,A
+0723 A3                INC     DPTR
+0724 E0                MOVX    A,@DPTR
+0725 F9                MOV     R1,A
+0726 8F82              MOV     DPL,R7
+0728 8E83              MOV     DPH,R6
+072A 120000      E     LCALL   ?C?CLDOPTR
+072D F500        R     MOV     curr_char,A
+                                           ; SOURCE LINE # 446
+072F 6500        R     XRL     A,get_char
+0731 6003              JZ      $ + 5H
+0733 020000      R     LJMP    FIND_NEXT_NODE
+                                           ; SOURCE LINE # 447
+0736 020000      R     LJMP    CHAR_OK
+                                           ; SOURCE LINE # 449
+                                           ; SOURCE LINE # 450
+                                           ; SOURCE LINE # 451
+0739         ?C0058:
+                                           ; SOURCE LINE # 453
+                                           ; SOURCE LINE # 456
+0739 E500        R     MOV     A,session_id
+073B C4                SWAP    A
+073C 54F0              ANL     A,#0F0H
+073E 2400        R     ADD     A,#LOW cmd+0DH
+0740 F582              MOV     DPL,A
+0742 E4                CLR     A
+0743 3400        R     ADDC    A,#HIGH cmd+0DH
+0745 F583              MOV     DPH,A
+0747 E4                CLR     A
+0748 F0                MOVX    @DPTR,A
+0749 A3                INC     DPTR
+074A F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 457
+074B E500        R     MOV     A,session_id
+074D C4                SWAP    A
+074E 54F0              ANL     A,#0F0H
+0750 2400        R     ADD     A,#LOW cmd+0BH
+0752 F582              MOV     DPL,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 37  
+
+0754 E4                CLR     A
+0755 3400        R     ADDC    A,#HIGH cmd+0BH
+0757 F583              MOV     DPH,A
+0759 E4                CLR     A
+075A F0                MOVX    @DPTR,A
+075B A3                INC     DPTR
+075C F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 460
+                                           ; SOURCE LINE # 461
+                                           ; SOURCE LINE # 462
+075D         ?C0047:
+                                           ; SOURCE LINE # 463
+075D 7F00              MOV     R7,#00H
+                                           ; SOURCE LINE # 464
+075F         ?C0040:
+075F 22                RET     
+             ; FUNCTION _cmd_detect (END)
+
+             ; FUNCTION _cmd_validate_test (BEGIN)
+                                           ; SOURCE LINE # 473
+0000 8F00        R     MOV     session_id,R7
+                                           ; SOURCE LINE # 474
+                                           ; SOURCE LINE # 477
+0002 EF                MOV     A,R7
+0003 C4                SWAP    A
+0004 54F0              ANL     A,#0F0H
+0006 2400        R     ADD     A,#LOW cmd+03H
+0008 F582              MOV     DPL,A
+000A E4                CLR     A
+000B 3400        R     ADDC    A,#HIGH cmd+03H
+000D F583              MOV     DPH,A
+000F E0                MOVX    A,@DPTR
+0010 FE                MOV     R6,A
+0011 A3                INC     DPTR
+0012 E0                MOVX    A,@DPTR
+0013 4E                ORL     A,R6
+0014 7002              JNZ     ?C0065
+                                           ; SOURCE LINE # 478
+0016 C3                CLR     C
+0017 22                RET     
+0018         ?C0065:
+                                           ; SOURCE LINE # 480
+0018 E500        R     MOV     A,session_id
+001A C4                SWAP    A
+001B 54F0              ANL     A,#0F0H
+001D 2400        R     ADD     A,#LOW cmd
+001F F582              MOV     DPL,A
+0021 E4                CLR     A
+0022 3400        R     ADDC    A,#HIGH cmd
+0024 F583              MOV     DPH,A
+0026 E0                MOVX    A,@DPTR
+0027 FB                MOV     R3,A
+0028 A3                INC     DPTR
+0029 E0                MOVX    A,@DPTR
+002A FA                MOV     R2,A
+002B A3                INC     DPTR
+002C E0                MOVX    A,@DPTR
+002D F9                MOV     R1,A
+002E EA                MOV     A,R2
+002F 49                ORL     A,R1
+0030 4B                ORL     A,R3
+0031 7002              JNZ     ?C0067
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 38  
+
+                                           ; SOURCE LINE # 481
+0033 C3                CLR     C
+0034 22                RET     
+0035         ?C0067:
+                                           ; SOURCE LINE # 483
+0035 E500        R     MOV     A,session_id
+0037 C4                SWAP    A
+0038 54F0              ANL     A,#0F0H
+003A 2400        R     ADD     A,#LOW cmd+05H
+003C F582              MOV     DPL,A
+003E E4                CLR     A
+003F 3400        R     ADDC    A,#HIGH cmd+05H
+0041 F583              MOV     DPH,A
+0043 E0                MOVX    A,@DPTR
+0044 FB                MOV     R3,A
+0045 A3                INC     DPTR
+0046 E0                MOVX    A,@DPTR
+0047 FA                MOV     R2,A
+0048 A3                INC     DPTR
+0049 E0                MOVX    A,@DPTR
+004A F9                MOV     R1,A
+004B EA                MOV     A,R2
+004C 49                ORL     A,R1
+004D 4B                ORL     A,R3
+004E 7002              JNZ     ?C0068
+                                           ; SOURCE LINE # 484
+0050 C3                CLR     C
+0051 22                RET     
+0052         ?C0068:
+                                           ; SOURCE LINE # 486
+0052 E500        R     MOV     A,session_id
+0054 C4                SWAP    A
+0055 54F0              ANL     A,#0F0H
+0057 2400        R     ADD     A,#LOW cmd+0AH
+0059 F582              MOV     DPL,A
+005B E4                CLR     A
+005C 3400        R     ADDC    A,#HIGH cmd+0AH
+005E F583              MOV     DPH,A
+0060 E0                MOVX    A,@DPTR
+0061 7002              JNZ     ?C0069
+                                           ; SOURCE LINE # 487
+0063 C3                CLR     C
+0064 22                RET     
+0065         ?C0069:
+                                           ; SOURCE LINE # 489
+;---- Variable 'cmd_offs' assigned to Register 'R6/R7' ----
+0065 E4                CLR     A
+0066 FF                MOV     R7,A
+0067 FE                MOV     R6,A
+0068         ?C0070:
+                                           ; SOURCE LINE # 491
+                                           ; SOURCE LINE # 492
+                                           ; SOURCE LINE # 493
+0068 E500        R     MOV     A,session_id
+006A C4                SWAP    A
+006B 54F0              ANL     A,#0F0H
+006D 2400        R     ADD     A,#LOW cmd
+006F F582              MOV     DPL,A
+0071 E4                CLR     A
+0072 3400        R     ADDC    A,#HIGH cmd
+0074 F583              MOV     DPH,A
+0076 E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 39  
+
+0077 FB                MOV     R3,A
+0078 A3                INC     DPTR
+0079 E0                MOVX    A,@DPTR
+007A FA                MOV     R2,A
+007B A3                INC     DPTR
+007C E0                MOVX    A,@DPTR
+007D F9                MOV     R1,A
+007E 8F82              MOV     DPL,R7
+0080 8E83              MOV     DPH,R6
+0082 120000      E     LCALL   ?C?CLDOPTR
+0085 6440              XRL     A,#040H
+0087 6002              JZ      ?C0072
+                                           ; SOURCE LINE # 494
+0089 C3                CLR     C
+008A 22                RET     
+008B         ?C0072:
+                                           ; SOURCE LINE # 496
+008B E500        R     MOV     A,session_id
+008D C4                SWAP    A
+008E 54F0              ANL     A,#0F0H
+0090 2400        R     ADD     A,#LOW cmd
+0092 F582              MOV     DPL,A
+0094 E4                CLR     A
+0095 3400        R     ADDC    A,#HIGH cmd
+0097 F583              MOV     DPH,A
+0099 E0                MOVX    A,@DPTR
+009A FB                MOV     R3,A
+009B A3                INC     DPTR
+009C E0                MOVX    A,@DPTR
+009D FA                MOV     R2,A
+009E A3                INC     DPTR
+009F E0                MOVX    A,@DPTR
+00A0 F9                MOV     R1,A
+00A1 8F82              MOV     DPL,R7
+00A3 8E83              MOV     DPH,R6
+00A5 A3                INC     DPTR
+00A6 120000      E     LCALL   ?C?CLDOPTR
+00A9 7023              JNZ     ?C0073
+00AB E500        R     MOV     A,session_id
+00AD C4                SWAP    A
+00AE 54F0              ANL     A,#0F0H
+00B0 2400        R     ADD     A,#LOW cmd
+00B2 F582              MOV     DPL,A
+00B4 E4                CLR     A
+00B5 3400        R     ADDC    A,#HIGH cmd
+00B7 F583              MOV     DPH,A
+00B9 E0                MOVX    A,@DPTR
+00BA FB                MOV     R3,A
+00BB A3                INC     DPTR
+00BC E0                MOVX    A,@DPTR
+00BD FA                MOV     R2,A
+00BE A3                INC     DPTR
+00BF E0                MOVX    A,@DPTR
+00C0 F9                MOV     R1,A
+00C1 8F82              MOV     DPL,R7
+00C3 8E83              MOV     DPH,R6
+00C5 A3                INC     DPTR
+00C6 A3                INC     DPTR
+00C7 120000      E     LCALL   ?C?CLDOPTR
+00CA 7002              JNZ     ?C0073
+                                           ; SOURCE LINE # 497
+00CC D3                SETB    C
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 40  
+
+00CD 22                RET     
+00CE         ?C0073:
+                                           ; SOURCE LINE # 499
+00CE E500        R     MOV     A,session_id
+00D0 C4                SWAP    A
+00D1 54F0              ANL     A,#0F0H
+00D3 2400        R     ADD     A,#LOW cmd+03H
+00D5 F582              MOV     DPL,A
+00D7 E4                CLR     A
+00D8 3400        R     ADDC    A,#HIGH cmd+03H
+00DA F583              MOV     DPH,A
+00DC E0                MOVX    A,@DPTR
+00DD FC                MOV     R4,A
+00DE A3                INC     DPTR
+00DF E0                MOVX    A,@DPTR
+00E0 C3                CLR     C
+00E1 9F                SUBB    A,R7
+00E2 EC                MOV     A,R4
+00E3 9E                SUBB    A,R6
+00E4 5002              JNC     ?C0074
+                                           ; SOURCE LINE # 500
+00E6 C3                CLR     C
+00E7 22                RET     
+00E8         ?C0074:
+                                           ; SOURCE LINE # 502
+00E8 E500        R     MOV     A,session_id
+00EA C4                SWAP    A
+00EB 54F0              ANL     A,#0F0H
+00ED 2400        R     ADD     A,#LOW cmd
+00EF F582              MOV     DPL,A
+00F1 E4                CLR     A
+00F2 3400        R     ADDC    A,#HIGH cmd
+00F4 F583              MOV     DPH,A
+00F6 E0                MOVX    A,@DPTR
+00F7 FB                MOV     R3,A
+00F8 A3                INC     DPTR
+00F9 E0                MOVX    A,@DPTR
+00FA FA                MOV     R2,A
+00FB A3                INC     DPTR
+00FC E0                MOVX    A,@DPTR
+00FD F9                MOV     R1,A
+00FE 8F82              MOV     DPL,R7
+0100 8E83              MOV     DPH,R6
+0102 A3                INC     DPTR
+0103 A3                INC     DPTR
+0104 120000      E     LCALL   ?C?CLDOPTR
+0107 2F                ADD     A,R7
+0108 FF                MOV     R7,A
+0109 E4                CLR     A
+010A 3E                ADDC    A,R6
+010B FE                MOV     R6,A
+                                           ; SOURCE LINE # 503
+010C 020000      R     LJMP    ?C0070
+             ; FUNCTION _cmd_validate_test (END)
+
+             ; FUNCTION _cmd_command_list (BEGIN)
+                                           ; SOURCE LINE # 511
+0000 8F00        R     MOV     session_id,R7
+                                           ; SOURCE LINE # 512
+                                           ; SOURCE LINE # 518
+0002 E4                CLR     A
+0003 F500        R     MOV     cmd_offs,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 41  
+
+0005 F500        R     MOV     cmd_offs+01H,A
+                                           ; SOURCE LINE # 520
+0007 EF                MOV     A,R7
+0008 C4                SWAP    A
+0009 54F0              ANL     A,#0F0H
+000B 2400        R     ADD     A,#LOW cmd
+000D F582              MOV     DPL,A
+000F E4                CLR     A
+0010 3400        R     ADDC    A,#HIGH cmd
+0012 F583              MOV     DPH,A
+0014 E0                MOVX    A,@DPTR
+0015 FB                MOV     R3,A
+0016 A3                INC     DPTR
+0017 E0                MOVX    A,@DPTR
+0018 FA                MOV     R2,A
+0019 A3                INC     DPTR
+001A E0                MOVX    A,@DPTR
+001B F9                MOV     R1,A
+001C E500        R     MOV     A,cmd_offs+01H
+001E 2403              ADD     A,#03H
+0020 FF                MOV     R7,A
+0021 E4                CLR     A
+0022 3500        R     ADDC    A,cmd_offs
+0024 8F82              MOV     DPL,R7
+0026 F583              MOV     DPH,A
+0028 120000      E     LCALL   ?C?CLDOPTR
+002B 750000      E     MOV     ?_printf?BYTE+03H,#00H
+002E F500        E     MOV     ?_printf?BYTE+04H,A
+0030 750000      E     MOV     ?_printf?BYTE+05H,#00H
+0033 750000      R     MOV     ?_printf?BYTE+06H,#HIGH cmd_buf
+0036 750000      R     MOV     ?_printf?BYTE+07H,#LOW cmd_buf
+0039 7BFF              MOV     R3,#0FFH
+003B 7A00        R     MOV     R2,#HIGH ?SC_0
+003D 7900        R     MOV     R1,#LOW ?SC_0
+003F 120000      E     LCALL   _printf
+0042         ?C0075:
+                                           ; SOURCE LINE # 521
+                                           ; SOURCE LINE # 522
+                                           ; SOURCE LINE # 523
+0042 E500        R     MOV     A,session_id
+0044 C4                SWAP    A
+0045 54F0              ANL     A,#0F0H
+0047 2400        R     ADD     A,#LOW cmd
+0049 F582              MOV     DPL,A
+004B E4                CLR     A
+004C 3400        R     ADDC    A,#HIGH cmd
+004E F583              MOV     DPH,A
+0050 E0                MOVX    A,@DPTR
+0051 FB                MOV     R3,A
+0052 A3                INC     DPTR
+0053 E0                MOVX    A,@DPTR
+0054 FA                MOV     R2,A
+0055 A3                INC     DPTR
+0056 E0                MOVX    A,@DPTR
+0057 F9                MOV     R1,A
+0058 850082      R     MOV     DPL,cmd_offs+01H
+005B 850083      R     MOV     DPH,cmd_offs
+005E 120000      E     LCALL   ?C?CLDOPTR
+0061 6440              XRL     A,#040H
+0063 6003              JZ      $ + 5H
+0065 020000      R     LJMP    ?C0078
+0068         ?C0077:
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 42  
+
+                                           ; SOURCE LINE # 526
+0068 E500        R     MOV     A,session_id
+006A C4                SWAP    A
+006B 54F0              ANL     A,#0F0H
+006D 2400        R     ADD     A,#LOW cmd
+006F F582              MOV     DPL,A
+0071 E4                CLR     A
+0072 3400        R     ADDC    A,#HIGH cmd
+0074 F583              MOV     DPH,A
+0076 E0                MOVX    A,@DPTR
+0077 FB                MOV     R3,A
+0078 A3                INC     DPTR
+0079 E0                MOVX    A,@DPTR
+007A FA                MOV     R2,A
+007B A3                INC     DPTR
+007C E0                MOVX    A,@DPTR
+007D F9                MOV     R1,A
+007E E500        R     MOV     A,cmd_offs+01H
+0080 2401              ADD     A,#01H
+0082 FF                MOV     R7,A
+0083 E4                CLR     A
+0084 3500        R     ADDC    A,cmd_offs
+0086 8F82              MOV     DPL,R7
+0088 F583              MOV     DPH,A
+008A 120000      E     LCALL   ?C?CLDOPTR
+008D 702A              JNZ     ?C0079
+008F E500        R     MOV     A,session_id
+0091 C4                SWAP    A
+0092 54F0              ANL     A,#0F0H
+0094 2400        R     ADD     A,#LOW cmd
+0096 F582              MOV     DPL,A
+0098 E4                CLR     A
+0099 3400        R     ADDC    A,#HIGH cmd
+009B F583              MOV     DPH,A
+009D E0                MOVX    A,@DPTR
+009E FB                MOV     R3,A
+009F A3                INC     DPTR
+00A0 E0                MOVX    A,@DPTR
+00A1 FA                MOV     R2,A
+00A2 A3                INC     DPTR
+00A3 E0                MOVX    A,@DPTR
+00A4 F9                MOV     R1,A
+00A5 E500        R     MOV     A,cmd_offs+01H
+00A7 2402              ADD     A,#02H
+00A9 FF                MOV     R7,A
+00AA E4                CLR     A
+00AB 3500        R     ADDC    A,cmd_offs
+00AD 8F82              MOV     DPL,R7
+00AF F583              MOV     DPH,A
+00B1 120000      E     LCALL   ?C?CLDOPTR
+00B4 7003              JNZ     $ + 5H
+00B6 020000      R     LJMP    ?C0078
+00B9         ?C0079:
+                                           ; SOURCE LINE # 529
+00B9 E500        R     MOV     A,session_id
+00BB C4                SWAP    A
+00BC 54F0              ANL     A,#0F0H
+00BE 2400        R     ADD     A,#LOW cmd+03H
+00C0 F582              MOV     DPL,A
+00C2 E4                CLR     A
+00C3 3400        R     ADDC    A,#HIGH cmd+03H
+00C5 F583              MOV     DPH,A
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 43  
+
+00C7 E0                MOVX    A,@DPTR
+00C8 FE                MOV     R6,A
+00C9 A3                INC     DPTR
+00CA E0                MOVX    A,@DPTR
+00CB C3                CLR     C
+00CC 9500        R     SUBB    A,cmd_offs+01H
+00CE EE                MOV     A,R6
+00CF 9500        R     SUBB    A,cmd_offs
+00D1 5003              JNC     $ + 5H
+00D3 020000      R     LJMP    ?C0078
+00D6         ?C0080:
+                                           ; SOURCE LINE # 532
+00D6 E4                CLR     A
+00D7 F500        R     MOV     cmd_buf_ix,A
+00D9         ?C0081:
+                                           ; SOURCE LINE # 533
+                                           ; SOURCE LINE # 534
+00D9 E500        R     MOV     A,cmd_offs+01H
+00DB 2404              ADD     A,#04H
+00DD FF                MOV     R7,A
+00DE E4                CLR     A
+00DF 3500        R     ADDC    A,cmd_offs
+00E1 FE                MOV     R6,A
+00E2 7C00              MOV     R4,#00H
+00E4 EF                MOV     A,R7
+00E5 2500        R     ADD     A,cmd_buf_ix
+00E7 FF                MOV     R7,A
+00E8 EC                MOV     A,R4
+00E9 3E                ADDC    A,R6
+00EA FE                MOV     R6,A
+00EB E500        R     MOV     A,session_id
+00ED C4                SWAP    A
+00EE 54F0              ANL     A,#0F0H
+00F0 2400        R     ADD     A,#LOW cmd
+00F2 F582              MOV     DPL,A
+00F4 E4                CLR     A
+00F5 3400        R     ADDC    A,#HIGH cmd
+00F7 F583              MOV     DPH,A
+00F9 E0                MOVX    A,@DPTR
+00FA FB                MOV     R3,A
+00FB A3                INC     DPTR
+00FC E0                MOVX    A,@DPTR
+00FD FA                MOV     R2,A
+00FE A3                INC     DPTR
+00FF E0                MOVX    A,@DPTR
+0100 F9                MOV     R1,A
+0101 8F82              MOV     DPL,R7
+0103 8E83              MOV     DPH,R6
+0105 120000      E     LCALL   ?C?CLDOPTR
+0108 F500        R     MOV     cmd_char,A
+                                           ; SOURCE LINE # 536
+010A 6440              XRL     A,#040H
+010C 601B              JZ      ?C0085
+010E E500        R     MOV     A,cmd_offs+01H
+0110 2401              ADD     A,#01H
+0112 FF                MOV     R7,A
+0113 E4                CLR     A
+0114 3500        R     ADDC    A,cmd_offs
+0116 8F82              MOV     DPL,R7
+0118 F583              MOV     DPH,A
+011A 120000      E     LCALL   ?C?CLDOPTR
+011D 2500        R     ADD     A,cmd_buf_ix
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 44  
+
+011F FF                MOV     R7,A
+0120 EC                MOV     A,R4
+0121 33                RLC     A
+0122 FE                MOV     R6,A
+0123 EF                MOV     A,R7
+0124 640E              XRL     A,#0EH
+0126 4E                ORL     A,R6
+0127 702E              JNZ     ?C0084
+0129         ?C0085:
+                                           ; SOURCE LINE # 538
+                                           ; SOURCE LINE # 539
+0129 E500        R     MOV     A,session_id
+012B C4                SWAP    A
+012C 54F0              ANL     A,#0F0H
+012E 2400        R     ADD     A,#LOW cmd
+0130 F582              MOV     DPL,A
+0132 E4                CLR     A
+0133 3400        R     ADDC    A,#HIGH cmd
+0135 F583              MOV     DPH,A
+0137 E0                MOVX    A,@DPTR
+0138 FB                MOV     R3,A
+0139 A3                INC     DPTR
+013A E0                MOVX    A,@DPTR
+013B FA                MOV     R2,A
+013C A3                INC     DPTR
+013D E0                MOVX    A,@DPTR
+013E F9                MOV     R1,A
+013F E500        R     MOV     A,cmd_offs+01H
+0141 2401              ADD     A,#01H
+0143 FF                MOV     R7,A
+0144 E4                CLR     A
+0145 3500        R     ADDC    A,cmd_offs
+0147 8F82              MOV     DPL,R7
+0149 F583              MOV     DPH,A
+014B 120000      E     LCALL   ?C?CLDOPTR
+014E 2500        R     ADD     A,cmd_buf_ix
+0150 2400        R     ADD     A,#LOW cmd_buf
+0152 F8                MOV     R0,A
+0153 E4                CLR     A
+0154 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 540
+0155 8037              SJMP    ?C0082
+                                           ; SOURCE LINE # 541
+0157         ?C0084:
+                                           ; SOURCE LINE # 543
+0157 E500        R     MOV     A,session_id
+0159 C4                SWAP    A
+015A 54F0              ANL     A,#0F0H
+015C 2400        R     ADD     A,#LOW cmd
+015E F582              MOV     DPL,A
+0160 E4                CLR     A
+0161 3400        R     ADDC    A,#HIGH cmd
+0163 F583              MOV     DPH,A
+0165 E0                MOVX    A,@DPTR
+0166 FB                MOV     R3,A
+0167 A3                INC     DPTR
+0168 E0                MOVX    A,@DPTR
+0169 FA                MOV     R2,A
+016A A3                INC     DPTR
+016B E0                MOVX    A,@DPTR
+016C F9                MOV     R1,A
+016D E500        R     MOV     A,cmd_offs+01H
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 45  
+
+016F 2401              ADD     A,#01H
+0171 FF                MOV     R7,A
+0172 E4                CLR     A
+0173 3500        R     ADDC    A,cmd_offs
+0175 8F82              MOV     DPL,R7
+0177 F583              MOV     DPH,A
+0179 120000      E     LCALL   ?C?CLDOPTR
+017C 2500        R     ADD     A,cmd_buf_ix
+017E 2400        R     ADD     A,#LOW cmd_buf
+0180 F8                MOV     R0,A
+0181 A600        R     MOV     @R0,cmd_char
+                                           ; SOURCE LINE # 544
+0183 0500        R     INC     cmd_buf_ix
+0185 E500        R     MOV     A,cmd_buf_ix
+0187 640F              XRL     A,#0FH
+0189 6003              JZ      $ + 5H
+018B 020000      R     LJMP    ?C0081
+018E         ?C0082:
+                                           ; SOURCE LINE # 546
+018E E500        R     MOV     A,session_id
+0190 C4                SWAP    A
+0191 54F0              ANL     A,#0F0H
+0193 2400        R     ADD     A,#LOW cmd
+0195 F582              MOV     DPL,A
+0197 E4                CLR     A
+0198 3400        R     ADDC    A,#HIGH cmd
+019A F583              MOV     DPH,A
+019C E0                MOVX    A,@DPTR
+019D FB                MOV     R3,A
+019E A3                INC     DPTR
+019F E0                MOVX    A,@DPTR
+01A0 FA                MOV     R2,A
+01A1 A3                INC     DPTR
+01A2 E0                MOVX    A,@DPTR
+01A3 F9                MOV     R1,A
+01A4 E500        R     MOV     A,cmd_offs+01H
+01A6 2403              ADD     A,#03H
+01A8 FF                MOV     R7,A
+01A9 E4                CLR     A
+01AA 3500        R     ADDC    A,cmd_offs
+01AC 8F82              MOV     DPL,R7
+01AE F583              MOV     DPH,A
+01B0 120000      E     LCALL   ?C?CLDOPTR
+01B3 750000      E     MOV     ?_printf?BYTE+03H,#00H
+01B6 F500        E     MOV     ?_printf?BYTE+04H,A
+01B8 750000      E     MOV     ?_printf?BYTE+05H,#00H
+01BB 750000      R     MOV     ?_printf?BYTE+06H,#HIGH cmd_buf
+01BE 750000      R     MOV     ?_printf?BYTE+07H,#LOW cmd_buf
+01C1 7BFF              MOV     R3,#0FFH
+01C3 7A00        R     MOV     R2,#HIGH ?SC_32
+01C5 7900        R     MOV     R1,#LOW ?SC_32
+01C7 120000      E     LCALL   _printf
+                                           ; SOURCE LINE # 548
+01CA E500        R     MOV     A,session_id
+01CC C4                SWAP    A
+01CD 54F0              ANL     A,#0F0H
+01CF 2400        R     ADD     A,#LOW cmd
+01D1 F582              MOV     DPL,A
+01D3 E4                CLR     A
+01D4 3400        R     ADDC    A,#HIGH cmd
+01D6 F583              MOV     DPH,A
+01D8 E0                MOVX    A,@DPTR
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 46  
+
+01D9 FB                MOV     R3,A
+01DA A3                INC     DPTR
+01DB E0                MOVX    A,@DPTR
+01DC FA                MOV     R2,A
+01DD A3                INC     DPTR
+01DE E0                MOVX    A,@DPTR
+01DF F9                MOV     R1,A
+01E0 E500        R     MOV     A,cmd_offs+01H
+01E2 2402              ADD     A,#02H
+01E4 FF                MOV     R7,A
+01E5 E4                CLR     A
+01E6 3500        R     ADDC    A,cmd_offs
+01E8 8F82              MOV     DPL,R7
+01EA F583              MOV     DPH,A
+01EC 120000      E     LCALL   ?C?CLDOPTR
+01EF 2500        R     ADD     A,cmd_offs+01H
+01F1 F500        R     MOV     cmd_offs+01H,A
+01F3 E4                CLR     A
+01F4 3500        R     ADDC    A,cmd_offs
+01F6 F500        R     MOV     cmd_offs,A
+                                           ; SOURCE LINE # 549
+01F8 020000      R     LJMP    ?C0075
+                                           ; SOURCE LINE # 550
+01FB         ?C0078:
+01FB 22                RET     
+             ; FUNCTION _cmd_command_list (END)
+
+             ; FUNCTION _cmd_init (BEGIN)
+                                           ; SOURCE LINE # 559
+0000 8B00        R     MOV     cmd_tab,R3
+0002 8A00        R     MOV     cmd_tab+01H,R2
+0004 8900        R     MOV     cmd_tab+02H,R1
+;---- Variable 'session_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 560
+                                           ; SOURCE LINE # 561
+0006 EF                MOV     A,R7
+0007 C4                SWAP    A
+0008 54F0              ANL     A,#0F0H
+000A 2400        R     ADD     A,#LOW cmd+0BH
+000C F582              MOV     DPL,A
+000E E4                CLR     A
+000F 3400        R     ADDC    A,#HIGH cmd+0BH
+0011 F583              MOV     DPH,A
+0013 E4                CLR     A
+0014 F0                MOVX    @DPTR,A
+0015 A3                INC     DPTR
+0016 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 562
+0017 EF                MOV     A,R7
+0018 C4                SWAP    A
+0019 54F0              ANL     A,#0F0H
+001B 2400        R     ADD     A,#LOW cmd+0DH
+001D F582              MOV     DPL,A
+001F E4                CLR     A
+0020 3400        R     ADDC    A,#HIGH cmd+0DH
+0022 F583              MOV     DPH,A
+0024 E4                CLR     A
+0025 F0                MOVX    @DPTR,A
+0026 A3                INC     DPTR
+0027 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 563
+0028 EF                MOV     A,R7
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 47  
+
+0029 C4                SWAP    A
+002A 54F0              ANL     A,#0F0H
+002C 2400        R     ADD     A,#LOW cmd+05H
+002E F582              MOV     DPL,A
+0030 E4                CLR     A
+0031 3400        R     ADDC    A,#HIGH cmd+05H
+0033 F583              MOV     DPH,A
+0035 E500        R     MOV     A,par_buf
+0037 F0                MOVX    @DPTR,A
+0038 A3                INC     DPTR
+0039 E500        R     MOV     A,par_buf+01H
+003B F0                MOVX    @DPTR,A
+003C A3                INC     DPTR
+003D E500        R     MOV     A,par_buf+02H
+003F F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 564
+0040 EF                MOV     A,R7
+0041 C4                SWAP    A
+0042 54F0              ANL     A,#0F0H
+0044 2400        R     ADD     A,#LOW cmd+0AH
+0046 F582              MOV     DPL,A
+0048 E4                CLR     A
+0049 3400        R     ADDC    A,#HIGH cmd+0AH
+004B F583              MOV     DPH,A
+004D E500        R     MOV     A,par_buf_size
+004F F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 565
+0050 EF                MOV     A,R7
+0051 C4                SWAP    A
+0052 54F0              ANL     A,#0F0H
+0054 2400        R     ADD     A,#LOW cmd
+0056 F582              MOV     DPL,A
+0058 E4                CLR     A
+0059 3400        R     ADDC    A,#HIGH cmd
+005B F583              MOV     DPH,A
+005D EB                MOV     A,R3
+005E F0                MOVX    @DPTR,A
+005F A3                INC     DPTR
+0060 EA                MOV     A,R2
+0061 F0                MOVX    @DPTR,A
+0062 A3                INC     DPTR
+0063 E9                MOV     A,R1
+0064 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 566
+0065 EF                MOV     A,R7
+0066 C4                SWAP    A
+0067 54F0              ANL     A,#0F0H
+0069 2400        R     ADD     A,#LOW cmd+03H
+006B F582              MOV     DPL,A
+006D E4                CLR     A
+006E 3400        R     ADDC    A,#HIGH cmd+03H
+0070 F583              MOV     DPH,A
+0072 E500        R     MOV     A,tab_size
+0074 F0                MOVX    @DPTR,A
+0075 A3                INC     DPTR
+0076 E500        R     MOV     A,tab_size+01H
+0078 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 568
+0079 EF                MOV     A,R7
+007A C4                SWAP    A
+007B 54F0              ANL     A,#0F0H
+007D 2400        R     ADD     A,#LOW cmd+0FH
+C51 COMPILER V8.05a   CMD                                                                  04/16/2009 20:53:41 PAGE 48  
+
+007F F582              MOV     DPL,A
+0081 E4                CLR     A
+0082 3400        R     ADDC    A,#HIGH cmd+0FH
+0084 F583              MOV     DPH,A
+0086 E0                MOVX    A,@DPTR
+0087 54FD              ANL     A,#0FDH
+0089 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 569
+008A EF                MOV     A,R7
+008B C4                SWAP    A
+008C 54F0              ANL     A,#0F0H
+008E 2400        R     ADD     A,#LOW cmd+0FH
+0090 F582              MOV     DPL,A
+0092 E4                CLR     A
+0093 3400        R     ADDC    A,#HIGH cmd+0FH
+0095 F583              MOV     DPH,A
+0097 E0                MOVX    A,@DPTR
+0098 54FE              ANL     A,#0FEH
+009A F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 570
+009B EF                MOV     A,R7
+009C C4                SWAP    A
+009D 54F0              ANL     A,#0F0H
+009F 2400        R     ADD     A,#LOW cmd+0FH
+00A1 F582              MOV     DPL,A
+00A3 E4                CLR     A
+00A4 3400        R     ADDC    A,#HIGH cmd+0FH
+00A6 F583              MOV     DPH,A
+00A8 E0                MOVX    A,@DPTR
+00A9 4404              ORL     A,#04H
+00AB F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 571
+00AC 22                RET     
+             ; FUNCTION _cmd_init (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   3123    ----
+   CONSTANT SIZE    =     44    ----
+   XDATA SIZE       =     16    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----      49
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

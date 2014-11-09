@@ -1,0 +1,23 @@
+Thermostat application
+=========================================
+Measuring temperature by digital sensors
+
+
+To test this program...
+-----------------------
+1. Start the debugger.
+2. View the Serial window.
+3. View the Toolbox.
+4. Run the program.
+5. Click a pulse button to generate a pulse on P3.2.
+
+
+The generated value displays in the serial window
+each time you repeat this process.
+
+
+Be sure to check the debug.ini file to see how the debugger
+buttons are created. A signal function is used to generate
+pulses.
+
+

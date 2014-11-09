@@ -1,0 +1,143 @@
+
+#ifndef __TSENSE_MCU__
+    #define __TSENSE_MCU__
+
+    typedef enum {
+                    TIMER_MODE_13BIT = 0,
+                    TIMER_MODE_16BIT,
+            	    TIMER_MODE_8BIT_AUTO_RELOAD,
+            	    TIMER_MODE_SPLIT_TIMER_MODE
+    };
+    
+    typedef enum {
+                    TSENSE_TIMER_CONFIG_TIMER = 0,
+                    TSENSE_TIMER_CONFIG_COUNTER,
+    };
+    
+    typedef enum {
+                    TSENSE_COUNT_REGARDLESS_INT0,
+                    TSENSE_COUNT_WHILE_INT0_HIGH,
+    };
+    
+
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    //    TL0 = 0;                                     // TL0 (8Ah) Timer/Counter 0 Low Byte
+    //    TH0 = 0;                                     // TH0 (8Ch) Timer/Counter 0 High Byte
+    //    TR0 = 1;                                     // 1 = Enable Timer0 counting
+    #define TSENSE_MCU_TIMER_RESET() { TH0 = 0; TL0 = 0; }
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    //    TL0 = 0;                                     // TL0 (8Ah) Timer/Counter 0 Low Byte
+    //    TH0 = 0;                                     // TH0 (8Ch) Timer/Counter 0 High Byte
+    //    TR0 = 1;                                     // 1 = Enable Timer0 counting
+    #define TSENSE_MCU_TIMER_RESTART() { TSENSE_MCU_TIMER_RESET(); TR0 = 1; }
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_MCU_TIMER_STOP()    { TR0 = 0; }
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_MCU_TIMER_STOP()    { TR0 = 0; }
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    //void tsense_mcu_timer_gate_set(bit gate)
+    //{
+    //    TMOD = gate?(TMOD | 8) : (TMOD & ~8);
+    //}
+    #define TSENSE_MCU_TIMER_GATE_SET(gate)	{ TMOD = gate?(TMOD | 8) : (TMOD & ~8); }
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_MCU_TIMER_INTERRUPT_REQUESTS_RESET() { TF0 = 0; } // 0 = reset timer overflow interrupt request 
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_MCU_EXTERNAL_INTERRUPT_ENABLE() { EX0 = 1; }       // 1 = Enable INT0 interrupt
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_MCU_EXTERNAL_INTERRUPT_DISABLE() { EX0 = 0; }     // 1 = Enable INT0 interrupt
+    
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_TIMER_L_VALUE TL0
+    
+
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    #define TSENSE_TIMER_H_VALUE TH0
+
+    
+    // +---------------------------------------------+
+    // |  MCU different routine                      |
+    // +---------------------------------------------+
+    void tsense_timer_config(uchar mode, bit device_type, bit gate)
+    {
+        // TMOD 89h Timer/Counter 0 and 1 Modes
+        //                                     
+        //    7       6      5     4      3       2      1     0
+        // +-------+-------+-----+-----+-------+-------+-----+-----+
+        // | GATE1 | C/T1# | M11 | M01 | GATE0 | C/T0# | M10 | M00 |
+        // +-------+-------+-----+-----+-------+-------+-----+-----+
+    
+        TMOD = ((TMOD & 0xF0) | ((((uchar)gate << 3) | ((uchar)device_type << 2) | mode) & 0x0F));      // Configure Timer0 mode
+    }
+    
+    
+    // +---------------------------------------------+
+    // | Driver init, variables init                 |
+    // +---------------------------------------------+
+    void tsense_mcu_init()
+    {
+        IE0 = 0;        // 0 = Reset INT0 interrupt request
+        EX0 = 0;        // 0 = Disable INT0 interrupt
+        
+        IT0 = 1;        // 1 = Input react on up edge
+        ET0 = 0;        // 0 = Disable Timer0 interrupt
+        TR0 = 0;        // 0 = Disable Timer0 counting
+        TF0 = 0;        // 1 = timer overflow - interrupt request
+    
+        //PX0L = 1;       // set external interrupt priority low flag
+        IPH0 |= PX0H;   // set external interrupt priority high flag
+        IPL0 |= PX0H;
+    
+        // TCON 88h Timer/Counter 0 and 1 Control
+        //    7       6      5     4      3       2      1     0
+        // +-------+-------+-----+-----+-------+-------+-----+-----+
+        // | TF1   | TR1   | TF0 | TR0 | IE1   | IT1   | IE0 | IT0 |
+        // +-------+-------+-----+-----+-------+-------+-----+-----+
+        //    0       1       0     1     0       1       0     1
+        //
+        //  TF0  Timer1 overflow
+        //  TR1  Timer1 start/stop         
+        //  TF0  Timer0 overflow
+        //  TR0  Timer0 start/stop         
+        //  IE1  INT1 interrupt request (by hardware)
+        //  IT1  INT1 react type 1=up edge, 0=zero level
+        //  IE0  INT0 interrupt request (by hardware)
+        //  IT0  INT0 react type 1=up edge, 0=zero level
+    }
+
+#endif

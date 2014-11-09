@@ -1,0 +1,332 @@
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE ISP
+OBJECT MODULE PLACED IN .\obj\isp.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\isp.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\isp.lst) OBJEC
+                    -T(.\obj\isp.obj)
+
+line level    source
+
+   1          
+   2           /////////////////////////////////////////////////////////////////////////////
+   3           // +---------------------------------------------------------------------+ //
+   4           // |                            ISP recovery                             | //
+   5           // |                     ------------------------------                  | //
+   6           // |                             Verze 1.02                              | //
+   7           // |                                                                     | //
+   8           // |                            Thomas Hoodger                           | //
+   9           // |                            (c) 2005-2008                            | //
+  10           // |                      thomas.hoodger(at)gmail.com                    | //
+  11           // |                                                                     | //
+  12           // +---------------------------------------------------------------------+ //
+  13           // |                                                                     | //
+  14           // |  Opraveni chybne nastavene konfigurace pro aktivaci ISP modu        | //
+  15           // |                                                                     | //
+  16           // +---------------------------------------------------------------------+ //
+  17           //    Version history:                                                     //
+  18           //                   ----------------------------------------------        //
+  19           //       1.01         Zakladni verze                                       //
+  20           //                   ----------------------------------------------        //
+  21           //       1.02         Podmineny preklad pro C51RD2 upraven,                //
+  22           //                    neceka se na uroven nektereho pinu,                  //
+  23           //                    ale BootVector a StatusByte jsou zkontrolovany       //
+  24           //                    ihned po startu a pripadne ihned obnoveny.           //
+  25           //                    Nekonecna smycka je aktivni pouze pro LPC922         //
+  26           //                   ----------------------------------------------        //
+  27           //                                                                         //
+  28           // ----------------------------------------------------------------------- //
+  29           /////////////////////////////////////////////////////////////////////////////
+  30          
+  31          #include "target.def"
+  32          #include TARGET_SFR_HEADER
+  33          #include <stdio.h>
+  34          #include "iap.h"                   // In Application Programming driver
+  35          #include "pin.h"
+  36          
+  37          // ------------------------------------------------------------------------------------------------
+  38          // Pinout
+  39          
+  40          #if TARGET_MCU == LPC922
+                  sbit    PIN_ISP_RECOVERY     =    P0^5;
+                  #define PIN_DEF_ISP_RECOVERY      PORT_ID_P0, 5
+              #else 
+  44              sbit    PIN_ISP_RECOVERY     =    P1^5;
+  45              #define PIN_DEF_ISP_RECOVERY      PORT_ID_P1, 5
+  46          #endif
+  47          
+  48          
+  49          // ------------------------------------------------------------------------------------------------
+  50          #define ISP_RECOVERY_LOOPS        30000
+  51          
+  52          uint TARGET_MMEM isp_loop;
+  53          
+  54          
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 2   
+
+  55          
+  56          // +---------------------------------------------------------------------+ 
+  57          // | Test ISP code                                                       |
+  58          // +---------------------------------------------------------------------+ 
+  59          bit isp_found()
+  60          {
+  61   1          unsigned char code *pgm_mtp_test = TARGET_IAP_ROUTINE;        // test pritomnosti ISP kodu (kvuli simu
+             -latoru)
+  62   1      
+  63   1          return((*pgm_mtp_test)?1:0);
+  64   1      }
+  65          
+  66          
+  67          // +---------------------------------------------------------------------+ 
+  68          // | Software "hot" reset                                                |
+  69          // +---------------------------------------------------------------------+ 
+  70          #if TARGET_MCU == LPC922
+              void isp_cpu_sw_reset()
+              {
+                  AUXR1 = 8;
+              }
+              #endif
+  76          
+  77          // +---------------------------------------------------------------------+ 
+  78          // | ISP mode recovery routine                                           |
+  79          // +---------------------------------------------------------------------+ 
+  80          void isp_recovery()
+  81          {
+  82   1          bit isp_recovered = 0;
+  83   1      
+  84   1          #if TARGET_MCU == C51RD2
+                      uchar status_byte;
+                      uchar boot_vector;
+                      uchar security_bits;
+                      bit   all_intr_temp;
+                  
+                      if(isp_found())
+                      {
+                          all_intr_temp = EA;
+                          EA = 0;                              // Disable all interrupts
+                          
+                          boot_vector   = IAP_read_boot_vector();
+                          status_byte   = IAP_read_status_byte();
+                          security_bits = IAP_read_security_bits();
+                      
+                          // Kontrola boot_vectoru
+                          if(boot_vector != 0xFC)
+                          {
+                              IAP_erase_boot_vector();
+                              IAP_program_boot_vector(0xFC);
+                              isp_recovered = 1;
+                          }
+                      
+                          // Kontrola security_bits
+                          /*
+                          if(!(security_bits & (2+4)))
+                          {
+                              sprintf(Report_FBuf, "SeB warning: %.2Xh\r\n", (int) security_bits);
+                              Report_Message(cReport_Dest_ID_SCOM, Report_FBuf);
+                          }
+                          */
+                      
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 3   
+
+                          // Kontrola status_byte (Zrejme zbytecne, pokud neni nulovy, program se nespusti)
+                          if(status_byte != 0x00)
+                          {
+                              IAP_program_status_byte(0);
+                              isp_recovered = 1;
+                          }
+                          EA = all_intr_temp;
+                  
+                          if(isp_recovered)
+                              printf(BR"ISP recovered."DBR);
+                      }
+                  #endif
+ 128   1      
+ 129   1          #if TARGET_MCU == LPC922
+                      bit all_intr_temp;
+              
+                      all_intr_temp = EA;
+                      EA = 0;
+              
+                      IAP_reset_boot_status();            
+                      IAP_reset_boot_vector();
+              
+                      EA = all_intr_temp;
+              
+                      //while(1);
+                      isp_cpu_sw_reset();
+                  #endif
+ 143   1      }
+ 144          
+ 145          
+ 146          // +---------------------------------------------------------------------+ 
+ 147          // | Direct call of ISP code                                             |
+ 148          // +---------------------------------------------------------------------+ 
+ 149          void isp_call_bootloader()
+ 150          {
+ 151   1          IAP_call_ISP_direct();
+ 152   1      }
+ 153          
+ 154          
+ 155          // +---------------------------------------------------------------------+ 
+ 156          // | Recovery request loop                                               |
+ 157          // +---------------------------------------------------------------------+ 
+ 158          void isp_security_check()
+ 159          {
+ 160   1          uchar test_loop;
+ 161   1          uchar probability;
+ 162   1      
+ 163   1          if(~PIN_ISP_RECOVERY)                         // pokud je pin nulovany
+ 164   1          {
+ 165   2              test_loop   = 100;                        // nastav pocet testovacich cyklu
+ 166   2              probability = 0;                          // nuluj pravdepodobnost
+ 167   2              while(test_loop)                          // smycka testu pravdepodobnosti nulovani pinu
+ 168   2              {
+ 169   3                  test_loop--;                          // odecti cykl
+ 170   3      
+ 171   3                  if(~PIN_ISP_RECOVERY)                 // pokud je pin v tuto chvili nulovany
+ 172   3                      probability++;                    // pripocti pravdepodobnost
+ 173   3              }        
+ 174   2      
+ 175   2              if(probability > 90)                      // pokud je pravdepodobnost vetsi nez 90%
+ 176   2                  isp_recovery();                       // obnov ISP mod
+ 177   2          }
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 4   
+
+ 178   1      }
+ 179          
+ 180          
+ 181          // +---------------------------------------------------------------------+ 
+ 182          // | Startup security request loop                                       |
+ 183          // +---------------------------------------------------------------------+ 
+ 184          void isp_security_loop()
+ 185          {           
+ 186   1          #if TARGET_MCU == LPC922
+                      pin_set(PIN_DEF_ISP_RECOVERY, PIN_TYPE_INPUT_ONLY);   // set pin as input only
+              
+                      isp_loop = ISP_RECOVERY_LOOPS;                        // wait in loop for n cycles
+                     
+                      while(isp_loop)
+                      {
+                          isp_security_check();
+                          isp_loop--;
+                      }
+                  #endif
+ 197   1      
+ 198   1          #if TARGET_MCU == C51RD2
+                      isp_recovery();
+                  #endif
+ 201   1      }
+ 202          
+ 203          
+ 204          
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 5   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION isp_found (BEGIN)
+                                           ; SOURCE LINE # 59
+                                           ; SOURCE LINE # 60
+                                           ; SOURCE LINE # 61
+;---- Variable 'pgm_mtp_test' assigned to Register 'DPTR' ----
+0000 90FFF0            MOV     DPTR,#0FFF0H
+                                           ; SOURCE LINE # 63
+0003 E4                CLR     A
+0004 93                MOVC    A,@A+DPTR
+0005 C3                CLR     C
+0006 6001              JZ      ?C0001
+0008 D3                SETB    C
+0009         ?C0001:
+0009         ?C0002:
+                                           ; SOURCE LINE # 64
+0009         ?C0003:
+0009 22                RET     
+             ; FUNCTION isp_found (END)
+
+             ; FUNCTION isp_recovery (BEGIN)
+                                           ; SOURCE LINE # 80
+                                           ; SOURCE LINE # 81
+                                           ; SOURCE LINE # 82
+0000 C200        R     CLR     isp_recovered
+                                           ; SOURCE LINE # 143
+0002 22                RET     
+             ; FUNCTION isp_recovery (END)
+
+             ; FUNCTION isp_call_bootloader (BEGIN)
+                                           ; SOURCE LINE # 149
+                                           ; SOURCE LINE # 150
+                                           ; SOURCE LINE # 151
+0000 020000      E     LJMP    IAP_call_ISP_direct
+             ; FUNCTION isp_call_bootloader (END)
+
+             ; FUNCTION isp_security_check (BEGIN)
+                                           ; SOURCE LINE # 158
+                                           ; SOURCE LINE # 159
+                                           ; SOURCE LINE # 163
+0000 A295              MOV     C,PIN_ISP_RECOVERY
+0002 B3                CPL     C
+0003 5019              JNC     ?C0011
+                                           ; SOURCE LINE # 164
+                                           ; SOURCE LINE # 165
+;---- Variable 'test_loop' assigned to Register 'R7' ----
+0005 7F64              MOV     R7,#064H
+                                           ; SOURCE LINE # 166
+;---- Variable 'probability' assigned to Register 'R6' ----
+0007 E4                CLR     A
+0008 FE                MOV     R6,A
+0009         ?C0007:
+                                           ; SOURCE LINE # 167
+0009 EF                MOV     A,R7
+000A 6009              JZ      ?C0008
+                                           ; SOURCE LINE # 168
+                                           ; SOURCE LINE # 169
+000C 1F                DEC     R7
+                                           ; SOURCE LINE # 171
+000D A295              MOV     C,PIN_ISP_RECOVERY
+C51 COMPILER V8.05a   ISP                                                                  04/16/2009 20:53:41 PAGE 6   
+
+000F B3                CPL     C
+0010 50F7              JNC     ?C0007
+                                           ; SOURCE LINE # 172
+0012 0E                INC     R6
+                                           ; SOURCE LINE # 173
+0013 80F4              SJMP    ?C0007
+0015         ?C0008:
+                                           ; SOURCE LINE # 175
+0015 EE                MOV     A,R6
+0016 D3                SETB    C
+0017 945A              SUBB    A,#05AH
+0019 4003              JC      ?C0011
+                                           ; SOURCE LINE # 176
+001B 120000      R     LCALL   isp_recovery
+                                           ; SOURCE LINE # 177
+                                           ; SOURCE LINE # 178
+001E         ?C0011:
+001E 22                RET     
+             ; FUNCTION isp_security_check (END)
+
+             ; FUNCTION isp_security_loop (BEGIN)
+                                           ; SOURCE LINE # 184
+                                           ; SOURCE LINE # 185
+                                           ; SOURCE LINE # 201
+0000 22                RET     
+             ; FUNCTION isp_security_loop (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     48    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =      2    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

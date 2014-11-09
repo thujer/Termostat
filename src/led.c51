@@ -1,0 +1,99 @@
+
+ /////////////////////////////////////////////////////////////////////////////
+ // +---------------------------------------------------------------------+ //
+ // |                              LED driver                             | //
+ // |                     ------------------------------                  | //
+ // |                            Verze 1.01Tiny                           | //
+ // |                                                                     | //
+ // |                            Thomas Hoodger                           | //
+ // |                        Copyright (c) 2005-2008                      | //
+ // |                     thomas.hoodger(at)gmail.com                     | //
+ // +---------------------------------------------------------------------+ //
+ // |                                                                     | //
+ // |  Ridi svit signalizacnich LED, automaticky zhasina jednotlive LED   | //
+ // |  po nastavene dobe svitu                                            | //
+ // |                                                                     | //
+ // +---------------------------------------------------------------------+ //
+ //    Version history:                                                     //
+ //       1.01         Zakladni verze                                       //
+ //                                                                         //
+ // ----------------------------------------------------------------------- //
+ /////////////////////////////////////////////////////////////////////////////
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+#include "timers.h"
+#include "led.h"
+
+//#define LED_COUNT          6
+#define LED_LIGHT_TIME    10
+
+
+uchar xdata LED_COUNTER[LED_COUNT];
+
+
+
+// +-----------------------------------------+
+// | Zhasnuti LED                            |
+// +-----------------------------------------+
+void led_off(uchar led_id)
+{
+    LED_PORT |= (1 << led_id);
+}
+
+
+// +-----------------------------------------+
+// | Rosviceni LED                           |
+// +-----------------------------------------+
+void led_on(uchar led_id)
+{
+    LED_PORT &= ~(1 << led_id);
+}
+
+
+// +-----------------------------------------+
+// | Rosviceni LED na urcity casovy interval |
+// +-----------------------------------------+
+void led_blink(uchar led_id)
+{
+    LED_COUNTER[led_id] = LED_LIGHT_TIME;           // nastav cas pro svit LED
+    led_on(led_id);                                 // rozhni
+}
+
+
+// +-----------------------------------------+
+// | Proces automatickeho zhasinani LED      |
+// +-----------------------------------------+
+void led_proc()
+{
+    uchar i;
+
+    if(!TIMER_LED)
+    {
+        TIMER_LED = TIME_10MS;
+    
+        for(i=0; i<LED_COUNT; i++)
+        {
+            if(LED_COUNTER[i]) 
+                LED_COUNTER[i]--;
+            else
+                led_off(i);                                 // zhasni LED
+        }
+    }
+}
+
+
+// +-----------------------------------------+
+// | Inicializace driveru                    |
+// +-----------------------------------------+
+void led_init()
+{
+    uchar i;
+
+    TIMER_LED = TIME_1SEC;
+
+    for(i=0; i<LED_COUNT; i++)
+        led_blink(i);
+}
+
+

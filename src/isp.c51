@@ -1,0 +1,204 @@
+
+ /////////////////////////////////////////////////////////////////////////////
+ // +---------------------------------------------------------------------+ //
+ // |                            ISP recovery                             | //
+ // |                     ------------------------------                  | //
+ // |                             Verze 1.02                              | //
+ // |                                                                     | //
+ // |                            Thomas Hoodger                           | //
+ // |                            (c) 2005-2008                            | //
+ // |                      thomas.hoodger(at)gmail.com                    | //
+ // |                                                                     | //
+ // +---------------------------------------------------------------------+ //
+ // |                                                                     | //
+ // |  Opraveni chybne nastavene konfigurace pro aktivaci ISP modu        | //
+ // |                                                                     | //
+ // +---------------------------------------------------------------------+ //
+ //    Version history:                                                     //
+ //                   ----------------------------------------------        //
+ //       1.01         Zakladni verze                                       //
+ //                   ----------------------------------------------        //
+ //       1.02         Podmineny preklad pro C51RD2 upraven,                //
+ //                    neceka se na uroven nektereho pinu,                  //
+ //                    ale BootVector a StatusByte jsou zkontrolovany       //
+ //                    ihned po startu a pripadne ihned obnoveny.           //
+ //                    Nekonecna smycka je aktivni pouze pro LPC922         //
+ //                   ----------------------------------------------        //
+ //                                                                         //
+ // ----------------------------------------------------------------------- //
+ /////////////////////////////////////////////////////////////////////////////
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+#include <stdio.h>
+#include "iap.h"                   // In Application Programming driver
+#include "pin.h"
+
+// ------------------------------------------------------------------------------------------------
+// Pinout
+
+#if TARGET_MCU == LPC922
+    sbit    PIN_ISP_RECOVERY     =    P0^5;
+    #define PIN_DEF_ISP_RECOVERY      PORT_ID_P0, 5
+#else 
+    sbit    PIN_ISP_RECOVERY     =    P1^5;
+    #define PIN_DEF_ISP_RECOVERY      PORT_ID_P1, 5
+#endif
+
+
+// ------------------------------------------------------------------------------------------------
+#define ISP_RECOVERY_LOOPS        30000
+
+uint TARGET_MMEM isp_loop;
+
+
+
+// +---------------------------------------------------------------------+ 
+// | Test ISP code                                                       |
+// +---------------------------------------------------------------------+ 
+bit isp_found()
+{
+    unsigned char code *pgm_mtp_test = TARGET_IAP_ROUTINE;        // test pritomnosti ISP kodu (kvuli simulatoru)
+
+    return((*pgm_mtp_test)?1:0);
+}
+
+
+// +---------------------------------------------------------------------+ 
+// | Software "hot" reset                                                |
+// +---------------------------------------------------------------------+ 
+#if TARGET_MCU == LPC922
+void isp_cpu_sw_reset()
+{
+    AUXR1 = 8;
+}
+#endif
+
+// +---------------------------------------------------------------------+ 
+// | ISP mode recovery routine                                           |
+// +---------------------------------------------------------------------+ 
+void isp_recovery()
+{
+    bit isp_recovered = 0;
+
+    #if TARGET_MCU == C51RD2
+        uchar status_byte;
+        uchar boot_vector;
+        uchar security_bits;
+        bit   all_intr_temp;
+    
+        if(isp_found())
+        {
+            all_intr_temp = EA;
+            EA = 0;                              // Disable all interrupts
+            
+            boot_vector   = IAP_read_boot_vector();
+            status_byte   = IAP_read_status_byte();
+            security_bits = IAP_read_security_bits();
+        
+            // Kontrola boot_vectoru
+            if(boot_vector != 0xFC)
+            {
+                IAP_erase_boot_vector();
+                IAP_program_boot_vector(0xFC);
+                isp_recovered = 1;
+            }
+        
+            // Kontrola security_bits
+            /*
+            if(!(security_bits & (2+4)))
+            {
+                sprintf(Report_FBuf, "SeB warning: %.2Xh\r\n", (int) security_bits);
+                Report_Message(cReport_Dest_ID_SCOM, Report_FBuf);
+            }
+            */
+        
+            // Kontrola status_byte (Zrejme zbytecne, pokud neni nulovy, program se nespusti)
+            if(status_byte != 0x00)
+            {
+                IAP_program_status_byte(0);
+                isp_recovered = 1;
+            }
+            EA = all_intr_temp;
+    
+            if(isp_recovered)
+                printf(BR"ISP recovered."DBR);
+        }
+    #endif
+
+    #if TARGET_MCU == LPC922
+        bit all_intr_temp;
+
+        all_intr_temp = EA;
+        EA = 0;
+
+        IAP_reset_boot_status();            
+        IAP_reset_boot_vector();
+
+        EA = all_intr_temp;
+
+        //while(1);
+        isp_cpu_sw_reset();
+    #endif
+}
+
+
+// +---------------------------------------------------------------------+ 
+// | Direct call of ISP code                                             |
+// +---------------------------------------------------------------------+ 
+void isp_call_bootloader()
+{
+    IAP_call_ISP_direct();
+}
+
+
+// +---------------------------------------------------------------------+ 
+// | Recovery request loop                                               |
+// +---------------------------------------------------------------------+ 
+void isp_security_check()
+{
+    uchar test_loop;
+    uchar probability;
+
+    if(~PIN_ISP_RECOVERY)                         // pokud je pin nulovany
+    {
+        test_loop   = 100;                        // nastav pocet testovacich cyklu
+        probability = 0;                          // nuluj pravdepodobnost
+        while(test_loop)                          // smycka testu pravdepodobnosti nulovani pinu
+        {
+            test_loop--;                          // odecti cykl
+
+            if(~PIN_ISP_RECOVERY)                 // pokud je pin v tuto chvili nulovany
+                probability++;                    // pripocti pravdepodobnost
+        }        
+
+        if(probability > 90)                      // pokud je pravdepodobnost vetsi nez 90%
+            isp_recovery();                       // obnov ISP mod
+    }
+}
+
+
+// +---------------------------------------------------------------------+ 
+// | Startup security request loop                                       |
+// +---------------------------------------------------------------------+ 
+void isp_security_loop()
+{           
+    #if TARGET_MCU == LPC922
+        pin_set(PIN_DEF_ISP_RECOVERY, PIN_TYPE_INPUT_ONLY);   // set pin as input only
+
+        isp_loop = ISP_RECOVERY_LOOPS;                        // wait in loop for n cycles
+       
+        while(isp_loop)
+        {
+            isp_security_check();
+            isp_loop--;
+        }
+    #endif
+
+    #if TARGET_MCU == C51RD2
+        isp_recovery();
+    #endif
+}
+
+
+

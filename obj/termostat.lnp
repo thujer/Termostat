@@ -1,0 +1,18 @@
+".\obj\STARTUP.obj",
+".\obj\iap.obj",
+".\obj\isp.obj",
+".\obj\cmd.obj",
+".\obj\main.obj",
+".\obj\str.obj",
+".\obj\stdout.obj",
+".\obj\uart.obj",
+".\obj\timers.obj",
+".\obj\event.obj",
+".\obj\pin.obj",
+".\obj\led.obj",
+".\obj\tsense.obj",
+".\obj\target.obj" 
+TO ".\obj\termostat" 
+
+PRINT(".\lst\termostat.map") CLASSES (XDATA (X:0x0-X:0x6FF), HDATA (X:0x0-X:0x6FF), 
+ECODE (C:0x0-C:0xFFFF), HCONST (C:0x0-C:0xFFFF)) 

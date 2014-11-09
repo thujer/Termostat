@@ -1,0 +1,70 @@
+ 
+  ///////////////////////////////////////////////////////////////////////////////////
+  // +---------------------------------------------------------------------------+ //
+  // |                         TARGET routines                                   | //
+  // |                           vesion 1.03                                     | //
+  // |                      ---------------------                                | //
+  // |           thomas (point) hoodger (at) gmail (point) com                   | //
+  // |                            (spam war)                                     | //
+  // +---------------------------------------------------------------------------+ //
+  // | Definice zakladnich parametru pro ruzne typy MCU v zavislosti na zvolenem | //
+  // | ID typu MCU                                                               | //
+  // +---------------------------------------------------------------------------+ //
+  // | Revision story>                                                           | //
+  // |                                                                           | //
+  // |     1.03 ... Pridany zavisle definice typu pameti TARGET_XMEM             | //
+  // |                                                                           | //
+  // +---------------------------------------------------------------------------+ //
+  ///////////////////////////////////////////////////////////////////////////////////
+#pragma LIST
+#pragma PAGELENGTH(30000);
+#pragma LINES
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+
+
+char const code *target_mcu_str[] = {
+    "UNKNOWN",
+    "C51RD2",
+    "C51ED2",
+    "LPC922"
+};
+    
+    
+void target_init()
+{
+    #if TARGET_MCU==C51ED2
+
+        /*
+        CKCON0 Register (SFR:8Fh)
+        CKCON0             7    6     5     4     3     2     1    0
+        T89C51RD2          -  WDX2  PCAX2  SIX2 T2X2  T1X2  T0X2  X2      Reset value: x000 0000b
+        AT89C51RD2/ED2  SPIX2 WDX2  PCAX2  SIX2 T2X2  T1X2  T0X2  X2      Reset value: 0000 0000b
+        */
+        
+        CKCON0 = 1;                // Select 6 clock periods per machine cycle
+    
+        IEN0 = 0;                  // Zakaz vsech preruseni (IE)
+    
+        IPH0 = 0;                  // Nulovani vsech priorit
+        IPH1 = 0;                  // Nulovani vsech priorit
+        IPL0 = 0;                  // Nulovani vsech priorit
+        IPL1 = 0;                  // Nulovani vsech priorit
+    
+        RS0 = 0;                   // Nastaveni registrove banky 0
+        RS1 = 0;                   // Nastaveni registrove banky 0
+    #endif
+    
+    #if TARGET_MCU==C51RD2
+        IE = 0;                    // Zakaz vsech preruseni
+        IP = 0;                    // Nulovani vsech priorit
+    
+        RS0 = 0;                   // Nastaveni registrove banky 0
+        RS1 = 0;                   // Nastaveni registrove banky 0
+
+    #endif
+
+    EA = 1;
+}
+

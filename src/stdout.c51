@@ -1,0 +1,84 @@
+//
+// +------------------------------------------------------------------------+
+// |         Presmerovani standardniho vystupu na vlastni rutinu            |
+// |                           vesion 1.02                                  |
+// +------------------------------------------------------------------------+
+// | Nahradi rutinu pro standardni vystup znaku volanim vlastni rutiny,     |
+// | nebo rutiny puvodni                                                    |
+// +------------------------------------------------------------------------+
+// | Revision story>                                                        |
+// |                                                                        |
+// |     1.02 ... Pridano staleho presmerovani komunikace                   |
+// |                                                                        |
+// +------------------------------------------------------------------------+
+//
+
+#include <stdio.h>
+//#include <stdarg.h>
+#include <uart.h>
+
+//bit  printf_ready = 1;                // printf function semaphore
+
+char (* putchar_fp)(char c);          // pointer typu void na rutinu pro vystup znaku
+
+
+// +-------------------------------------------------------+
+// | Nahrazeni puvodni rutiny pro standardni vystup znaku  |
+// +-------------------------------------------------------+
+char putchar(char c)
+{
+    /* Body of Keil's putchar moved to UART() and replaced with...  */
+    if(putchar_fp)
+        return putchar_fp(c);
+
+    return(0);
+}
+
+
+// +-------------------------------------------------------+
+// | Formatovany vystup textu na specifikovane rozhranni   |
+// +-------------------------------------------------------+
+//   Rozhranni musi mit deklarovanu funkci pro vystup znaku
+//   funkce je potom volana s nazvem teto funkce v parametru
+//   a vystup je tak docasne presmerovan na jine rozhranni
+//   po skonceni odesilani retezce je vystup opet presmerovan
+//   na seriove rozhranni
+//
+//   my_printf(SCOM, "%s", "Vystup na synchronni serial")
+//
+/*
+int stdout_printf(char (* which_putchar_fp)(char), const char *format, ...)
+{
+    int      ret_val;
+    va_list  ap;
+
+    putchar_fp = which_putchar_fp;
+
+    va_start(ap, format);
+    ret_val = vprintf(format, ap);
+    va_end(ap);
+
+    putchar_fp = UART;         // set default output
+
+    return ret_val;
+}
+*/
+
+
+// +------------------------------------------------------------+
+// | Presmerovani standardniho vystupu na specifikovanou rutinu |
+// +------------------------------------------------------------+
+int stdout_init(char (* which_putchar_fp)(char))
+{
+    putchar_fp = which_putchar_fp;
+}
+
+
+// +-------------------------------------------------------+
+// | Inicializace                                          |
+// +-------------------------------------------------------+
+//void stdout_init()
+//{
+//    putchar_fp = putchar;         // set default output to serial
+//}
+

@@ -1,0 +1,129 @@
+C51 COMPILER V8.05a   TARGET                                                               04/16/2009 20:53:45 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE TARGET
+OBJECT MODULE PLACED IN .\obj\target.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\target.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\target.lst)
+                    - OBJECT(.\obj\target.obj)
+
+line level    source
+
+   1           
+   2            ///////////////////////////////////////////////////////////////////////////////////
+   3            // +---------------------------------------------------------------------------+ //
+   4            // |                         TARGET routines                                   | //
+   5            // |                           vesion 1.03                                     | //
+   6            // |                      ---------------------                                | //
+   7            // |           thomas (point) hoodger (at) gmail (point) com                   | //
+   8            // |                            (spam war)                                     | //
+   9            // +---------------------------------------------------------------------------+ //
+  10            // | Definice zakladnich parametru pro ruzne typy MCU v zavislosti na zvolenem | //
+  11            // | ID typu MCU                                                               | //
+  12            // +---------------------------------------------------------------------------+ //
+  13            // | Revision story>                                                           | //
+  14            // |                                                                           | //
+  15            // |     1.03 ... Pridany zavisle definice typu pameti TARGET_XMEM             | //
+  16            // |                                                                           | //
+  17            // +---------------------------------------------------------------------------+ //
+  18            ///////////////////////////////////////////////////////////////////////////////////
+  19          #pragma LIST
+  20          #pragma PAGELENGTH(30000);
+  21          #pragma LINES
+  22          
+  23          #include "target.def"
+  24          #include TARGET_SFR_HEADER
+  25          
+  26          
+  27          char const code *target_mcu_str[] = {
+  28              "UNKNOWN",
+  29              "C51RD2",
+  30              "C51ED2",
+  31              "LPC922"
+  32          };
+  33              
+  34              
+  35          void target_init()
+  36          {
+  37   1          #if TARGET_MCU==C51ED2
+  38   1      
+  39   1              /*
+  40   1              CKCON0 Register (SFR:8Fh)
+  41   1              CKCON0             7    6     5     4     3     2     1    0
+  42   1              T89C51RD2          -  WDX2  PCAX2  SIX2 T2X2  T1X2  T0X2  X2      Reset value: x000 0000b
+  43   1              AT89C51RD2/ED2  SPIX2 WDX2  PCAX2  SIX2 T2X2  T1X2  T0X2  X2      Reset value: 0000 0000b
+  44   1              */
+  45   1              
+  46   1              CKCON0 = 1;                // Select 6 clock periods per machine cycle
+  47   1          
+  48   1              IEN0 = 0;                  // Zakaz vsech preruseni (IE)
+  49   1          
+  50   1              IPH0 = 0;                  // Nulovani vsech priorit
+  51   1              IPH1 = 0;                  // Nulovani vsech priorit
+  52   1              IPL0 = 0;                  // Nulovani vsech priorit
+  53   1              IPL1 = 0;                  // Nulovani vsech priorit
+  54   1          
+  55   1              RS0 = 0;                   // Nastaveni registrove banky 0
+  56   1              RS1 = 0;                   // Nastaveni registrove banky 0
+  57   1          #endif
+  58   1          
+  59   1          #if TARGET_MCU==C51RD2
+                      IE = 0;                    // Zakaz vsech preruseni
+                      IP = 0;                    // Nulovani vsech priorit
+                  
+                      RS0 = 0;                   // Nastaveni registrove banky 0
+                      RS1 = 0;                   // Nastaveni registrove banky 0
+              
+                  #endif
+  67   1      
+  68   1          EA = 1;
+  69   1      }
+  70          
+C51 COMPILER V8.05a   TARGET                                                               04/16/2009 20:53:45 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION target_init (BEGIN)
+                                           ; SOURCE LINE # 35
+                                           ; SOURCE LINE # 36
+                                           ; SOURCE LINE # 46
+0000 758F01            MOV     CKCON0,#01H
+                                           ; SOURCE LINE # 48
+0003 E4                CLR     A
+0004 F5A8              MOV     IEN0,A
+                                           ; SOURCE LINE # 50
+0006 F5B7              MOV     IPH0,A
+                                           ; SOURCE LINE # 51
+0008 F5B3              MOV     IPH1,A
+                                           ; SOURCE LINE # 52
+000A F5B8              MOV     IPL0,A
+                                           ; SOURCE LINE # 53
+000C F5B2              MOV     IPL1,A
+                                           ; SOURCE LINE # 55
+000E C2D3              CLR     RS0
+                                           ; SOURCE LINE # 56
+0010 C2D4              CLR     RS1
+                                           ; SOURCE LINE # 68
+0012 D2AF              SETB    EA
+                                           ; SOURCE LINE # 69
+0014 22                RET     
+             ; FUNCTION target_init (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     21    ----
+   CONSTANT SIZE    =     29    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      8    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

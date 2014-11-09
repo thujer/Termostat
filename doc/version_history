@@ -1,0 +1,55 @@
+
+  Version history
+  ------------------------
+    1.00       Zakladni funkce casoveho spinace v zavislosti na sepnuti PIR
+
+               Funkce monostabilniho filtru.
+
+               Upravena ochrana ISP kodu, ISP mod se aktivuje prikazem "boot<cr>",
+               po detekovani prikazu je zapsan boot vektor 0x1F a status byte 1 pomoci IAP
+               a program zustane v nekonecne smycce. V tomto stavu je nutne provest
+               1x neuspesny pokus o naprogramovani, je tak smazana pamet a zrejme i spravne
+               nastaveny vektory pro ISP mod (jinak se stale spousti uzivatelsky kod).
+               Po restartu je jiz spusten mod ISP.
+               
+
+    1.01       zmena v driveru UART, pri preteceni prijimaciho bufferu nebyl nulova priznak preruseni,
+               preruseni se tedy vyvolavalo stale dokola.
+               
+
+    1.02       pridan driver udalosti
+               driver PIR cidla generuje udalost pri aktivaci a deaktivaci
+
+    1.03       pridan watchdog
+               pridan prikaz - ILOOP -> nekonecna smycka
+
+    1.04       opravena chyba v autorizaci IAP, ISP mod jiz funguje spravne, po potvrzeni prikazu BOOT
+               je po IAP autorizaci zapsan BootVector a StatusByte, pote je program zacyklen do nekonecne
+               smycky a ceka se na az watchdog resetuje MCU po resetu je MCU v ISP modu, po dalsim resetu
+               je opet spusten kod programu
+                
+    1.05       pridana filtrace pinu pro ISP recovery
+
+               pridany ladici prikazy pro vypnuti/zapnuti preruseni serialu
+
+               opravena chyba pri odpojeni serialu - piny RXD i TXD jsou typu PUSH-PULL,
+               pri odpojeni komunikace zustava na vstupech "1".
+
+    1.06       pridan driver komparatoru, vstup CMP1 pripojen na fotoclen, podle urovne osvetleni - napeti
+               je povoleno sepnuti svetla
+
+    1.07       prohozeny funkce pinu P1.2 (nyni ISP recovery) a P1.7 (nyni PIR_OUT)
+               z duvodu jednodussiho usporadani cest na tistenem spoji
+
+               oprava chyby ve vraceni 2. a dalsich parametru v driveru CMD
+        
+               rozsireny prikazy P0 a P1, je mozne se odkazovat i primo na jednotlive piny a menit jejich stavy
+
+               pridana konfigurace pinu - driver PIN
+
+               negace stavu v driveru LIGHT na pinu pro spinani svetla - zmena vystupniho tranzistoru z PNP na NPN
+
+               uprava casovace PIR - pri naruseni zony je resetovan citac alarmu
+
+               zmenen nazev driveru light na light_fade, presneji vystihuje funkci driveru
+

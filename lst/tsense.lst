@@ -1,0 +1,1291 @@
+C51 COMPILER V8.05a   TSENSE                                                               04/16/2009 20:53:45 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE TSENSE
+OBJECT MODULE PLACED IN .\obj\tsense.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\tsense.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\tsense.lst)
+                    - OBJECT(.\obj\tsense.obj)
+
+line level    source
+
+   1          
+   2              /////////////////////////////////////////////////////////////////////////////
+   3              // +---------------------------------------------------------------------+ //
+   4              // |                            Temperature Sensor                       | //
+   5              // |                       ----------------------------                  | //
+   6              // |                              Version 1.00a                          | //
+   7              // |                                                                     | //
+   8              // |                         Copyright Thomas Hoodger                    | //
+   9              // |                             (c) 2005-2008                           | //
+  10              // |                      thomas.hoodger(at)gmail.com                    | //
+  11              // |                                                                     | //
+  12              // +---------------------------------------------------------------------+ //
+  13              // |  Calculating temperature from external detector                     | //
+  14              // +---------------------------------------------------------------------+ //
+  15              //                                                                         //
+  16              //  ---------------------------------------------------------------------  //
+  17              //    Version history:                                                     //
+  18              //                                                                         //
+  19              //       1.01         Zakladni verze s jednorozmernym bufferem udalosti    //
+  20              //                                                                         //
+  21              //                                                                         //
+  22              //  ---------------------------------------------------------------------  //
+  23              //                                                                         //
+  24              // ----------------------------------------------------------------------- //
+  25              /////////////////////////////////////////////////////////////////////////////
+  26          
+  27          #pragma LIST
+  28          #pragma PAGELENGTH(30000);
+  29          #pragma LINES
+  30          
+  31          #define uchar  unsigned char
+  32          #define uint   unsigned int
+  33          #define ulong  unsigned long
+  34          
+  35          #include "target.def"
+  36          #include TARGET_SFR_HEADER
+  37          #include "target.h"
+  38          #include "event.h"
+  39          #include "event.def"
+  40          #include "led.h"
+  41          #include "led.def"
+  42          #include "my_types.h"
+  43          #include "timers.h"
+  44          #include "tsense.def"
+  45          #include "tsense.mcu"
+  46          
+  47          // ------------------------------------------------------------------------------------------
+  48          // Task buffer structure
+  49          typedef struct {
+  50              uchar  sensor_id;
+  51              uchar  event_id;
+  52          } t_tsense_task;
+  53          
+  54          // ------------------------------------------------------------------------------------------
+  55          // TSense driver task scheduler variables
+  56          uchar          TARGET_MMEM  tsense_task_ix_wr;                         // Index for task write
+  57          uchar          TARGET_MMEM  tsense_task_ix_rd;                         // Index for task read
+  58          uchar          TARGET_MMEM  tsense_task_in_buf;                        // Current number of pieces in buff
+             -er
+  59          t_tsense_task  TARGET_XMEM  tsense_task_buf[TSENSE_TASK_BUFFER_SIZE];  // Tasks buffer
+  60          bit                         tsense_task_missed_flag;                   // Flag of buffer overload
+  61          bit                         tsense_task_buf_empty_flag;                // Flag to generate buffer emptied 
+             -event
+  62          
+  63          // ------------------------------------------------------------------------------------------
+  64          // Current working task
+  65          uchar         TARGET_SMEM   tsense_sensor_id;                          // Current sensor
+  66          uchar         TARGET_SMEM   tsense_event_id;                           // Measure finish generated event
+  67          
+  68          // ------------------------------------------------------------------------------------------
+  69          // Measuring variables
+  70          bit                         tsense_measure_signal_level_flag;          // Measuring signal level 
+  71          bit                         tsense_value_pickup_request;               // Measure pickup request
+  72          
+  73          uchar          TARGET_SMEM  tsense_measure_skip_periods;               // Skip periods
+  74          uchar          TARGET_SMEM  tsense_measure_period_count;               // Measured periods count
+  75          
+  76          t_double_byte  TARGET_SMEM  tsense_timer_value;
+  77          uint           TARGET_SMEM  tsense_timer_value_H;                      // Measure value high level
+  78          uint           TARGET_SMEM  tsense_timer_value_L;                      // Measure value low level
+  79          
+  80          float          TARGET_SMEM  tsense_temperature;                        // Calculated temperature
+  81          uchar          TARGET_SMEM  tsense_interrupt_counter;                  // interrupt call counter
+  82          // ------------------------------------------------------------------------------------------
+  83          #if TSENSE_COMPILE_COMPENSATION
+  84          // Measuring compensation
+  85          uint           TARGET_MMEM  tsense_timer_H_value_min[TSENSE_PERIODS_SKIPPED]; // Measure value high level
+  86          uint           TARGET_MMEM  tsense_timer_H_value_max[TSENSE_PERIODS_SKIPPED]; // Measure value low level
+  87          uint           TARGET_MMEM  tsense_timer_L_value_min[TSENSE_PERIODS_SKIPPED]; // Measure value high level
+  88          uint           TARGET_MMEM  tsense_timer_L_value_max[TSENSE_PERIODS_SKIPPED]; // Measure value low level
+  89          #endif
+  90          // ------------------------------------------------------------------------------------------
+  91          #ifdef TSENSE_DEBUG_LOG
+  92          uint           TARGET_MMEM  tsense_timer_H_array[TSENSE_PERIOD_COUNT]; // array of time values
+  93          uchar          TARGET_SMEM  tsense_timer_H_array_ix;
+  94          
+  95          uint           TARGET_MMEM  tsense_timer_L_array[TSENSE_PERIOD_COUNT]; // array of time values
+  96          uchar          TARGET_SMEM  tsense_timer_L_array_ix;
+  97          #endif
+  98          // ------------------------------------------------------------------------------------------
+  99          
+ 100          
+ 101          
+ 102          // +---------------------------------------------+
+ 103          // |  Add TSENSE task into driver-self buffer    |
+ 104          // +---------------------------------------------+
+ 105          // |  Returns                                    |
+ 106          // |     1 ... ok, task saved in buffer          |
+ 107          // |     0 ... error, task buffer full           |
+ 108          // +---------------------------------------------+
+ 109          bit tsense_add_task(uchar sensor_id, uchar event_id)
+ 110          {
+ 111   1          if(tsense_task_in_buf < TSENSE_TASK_BUFFER_SIZE)                     // if its space in buffer
+ 112   1          {
+ 113   2              tsense_task_ix_wr %= TSENSE_TASK_BUFFER_SIZE;                    // rotate index for write
+ 114   2              tsense_task_buf[tsense_task_ix_wr].sensor_id = sensor_id;        // save sensor into task buffer
+ 115   2              tsense_task_buf[tsense_task_ix_wr].event_id  = event_id;         // save event into task buffer
+ 116   2              tsense_task_ix_wr++;                                             // move index for write
+ 117   2              tsense_task_in_buf++;                                            // increase num of pieces in buff
+             -er
+ 118   2              return(1);
+ 119   2          }
+ 120   1          else
+ 121   1              return(0);
+ 122   1      }
+ 123          
+ 124          
+ 125          // +---------------------------------------------+
+ 126          // | Temperature sensor live test                |
+ 127          // +---------------------------------------------+
+ 128          bit tsense_sensor_live_test_ok()
+ 129          {
+ 130   1          TIMER_TSENSE = TSENSE_CONNECT_TIME;
+ 131   1      
+ 132   1          // wait for H on SENSOR_INPUT
+ 133   1          while(TSENSE_SENSOR_INPUT)
+ 134   1              if(!TIMER_TSENSE)
+ 135   1                  return(TSENSE_SENSOR_LIVE_ERROR);
+ 136   1      
+ 137   1          // wait for zero on SENSOR_INPUT
+ 138   1          while(TIMER_TSENSE)
+ 139   1              if(~TSENSE_SENSOR_INPUT)
+ 140   1                  return(TSENSE_SENSOR_LIVE_OK);
+ 141   1      
+ 142   1          return(TSENSE_SENSOR_LIVE_ERROR);
+ 143   1      }
+ 144          
+ 145          
+ 146          // +---------------------------------------------+
+ 147          // | Start measuring of wanted temperature       |
+ 148          // +---------------------------------------------+
+ 149          bit tsense_get_temperature(uchar sensor_id, uchar event_id)
+ 150          {
+ 151   1          uchar i;
+ 152   1      
+ 153   1          // Nastaveni promennych pro spusteni mereni
+ 154   1          // nastaveni navratove udalosti
+ 155   1          // nastaveni multiplexeru na pozadovane cidlo
+ 156   1      
+ 157   1          // Set on 3 low bits of P0 multiplexer address - sensor address
+ 158   1          //P0 = (ts_sense_id & (1+2+4)) | (P0 & (0xFF-(1+2+4)));
+ 159   1      
+ 160   1          // Start measuring
+ 161   1          // ------------------------------------
+ 162   1          tsense_sensor_id = sensor_id;
+ 163   1          tsense_event_id = event_id;
+ 164   1      
+ 165   1          tsense_value_pickup_request = 0;
+ 166   1          tsense_interrupt_counter = 0;
+ 167   1      
+ 168   1          tsense_timer_config(TIMER_MODE_16BIT, TSENSE_TIMER_CONFIG_TIMER, TSENSE_TIMER_COUNT_IF_INT0_HIGH);
+ 169   1      
+ 170   1          TSENSE_MCU_TIMER_INTERRUPT_REQUESTS_RESET();
+ 171   1          TSENSE_MCU_TIMER_GATE_SET(TSENSE_COUNT_REGARDLESS_INT0);
+ 172   1      
+ 173   1          tsense_measure_period_count = TSENSE_PERIOD_COUNT;
+ 174   1          tsense_measure_signal_level_flag = TSENSE_SIGNAL_LEVEL_HIGH;
+ 175   1      
+ 176   1          tsense_timer_value_H = 0;
+ 177   1          tsense_timer_value_L = 0;
+ 178   1      
+ 179   1          #ifdef TSENSE_DEBUG_LOG
+ 180   1          tsense_timer_H_array_ix = 0;
+ 181   1          tsense_timer_L_array_ix = 0;
+ 182   1      
+ 183   1          for(i=TSENSE_PERIODS_SKIPPED; i; i--)
+ 184   1          {
+ 185   2              tsense_timer_H_value_min[i] = 0xFFFF;
+ 186   2              tsense_timer_H_value_max[i] = 0;
+ 187   2              tsense_timer_L_value_min[i] = 0xFFFF;
+ 188   2              tsense_timer_L_value_max[i] = 0;     
+ 189   2          }
+ 190   1          #endif
+ 191   1      
+ 192   1          tsense_measure_skip_periods = TSENSE_PERIODS_SKIPPED;
+ 193   1          TSENSE_MCU_TIMER_STOP();
+ 194   1          TSENSE_MCU_TIMER_RESET();
+ 195   1      
+ 196   1          // Wait for period start, test incoming pulses
+ 197   1          if(tsense_sensor_live_test_ok())
+ 198   1          {
+ 199   2              TSENSE_MCU_EXTERNAL_INTERRUPT_ENABLE();
+ 200   2              return(TSENSE_SENSOR_LIVE_OK);
+ 201   2          }
+ 202   1          else
+ 203   1          {
+ 204   2              event_send(EVENT_TSENSE_ERROR, sensor_id);
+ 205   2              return(TSENSE_SENSOR_LIVE_ERROR);
+ 206   2          }
+ 207   1      
+ 208   1          led_blink(LED_ID_MEASURE);
+ 209   1      }
+ 210          
+ 211          
+ 212          
+ 213          // +---------------------------------------------+
+ 214          // | Interrupt measuring routine                 |
+ 215          // +---------------------------------------------+
+ 216          #pragma NOAREGS
+ 217          void tsense_interrupt_ex0() interrupt 0 using 1
+ 218          {
+ 219   1          uchar i;
+ 220   1      
+ 221   1          TSENSE_MCU_EXTERNAL_INTERRUPT_DISABLE();
+ 222   1          TSENSE_MCU_TIMER_STOP();
+ 223   1          tsense_timer_value.byte.low = TSENSE_TIMER_L_VALUE;                 // Copy timer value signal High le
+             -vel
+ 224   1          tsense_timer_value.byte.high = TSENSE_TIMER_H_VALUE;                // Copy timer value signal High le
+             -vel
+ 225   1          TSENSE_MCU_TIMER_RESTART();
+ 226   1      
+ 227   1          if(!tsense_measure_skip_periods)
+ 228   1          {
+ 229   2              if(tsense_measure_signal_level_flag == TSENSE_SIGNAL_LEVEL_HIGH)
+ 230   2              {
+ 231   3                  if(tsense_measure_period_count)
+ 232   3                  {
+ 233   4                      tsense_timer_value_H += tsense_timer_value.word;            // Add timer value into High l
+             -evel timer
+ 234   4                      tsense_measure_period_count--;                              // decrement counter
+ 235   4      
+ 236   4                      #if TSENSE_COMPILE_COMPENSATION == 1
+ 237   4                          // realtime - get smallest period values
+ 238   4                          for(i=TSENSE_PERIODS_SKIPPED; (i-1); i--)
+ 239   4                          {
+ 240   5                              if(tsense_timer_value.word < tsense_timer_H_value_min[i])
+ 241   5                              {
+ 242   6                                  if(tsense_timer_H_value_min[i-1] > tsense_timer_H_value_min[i])
+ 243   6                                      tsense_timer_H_value_min[i-1] = tsense_timer_value.word;
+ 244   6                                  else
+ 245   6                                      tsense_timer_H_value_min[i] = tsense_timer_value.word;
+ 246   6                              }
+ 247   5                          }
+ 248   4      
+ 249   4                          /*
+ 250   4                          // realtime - get 2 smallest values;
+ 251   4                          if((tsense_timer_value.word < tsense_timer_H_value_min_1) ||
+ 252   4                             (tsense_timer_value.word < tsense_timer_H_value_min_2))
+ 253   4                          {
+ 254   4                              if(tsense_timer_H_value_min_2 > tsense_timer_H_value_min_1)
+ 255   4                                  tsense_timer_H_value_min_2 = tsense_timer_value.word;
+ 256   4                              else
+ 257   4                                  tsense_timer_H_value_min_1 = tsense_timer_value.word;
+ 258   4                          }
+ 259   4                          
+ 260   4                          // realtime - get 2 biggest values;
+ 261   4                          if((tsense_timer_H_value_max_1 < tsense_timer_value.word) ||
+ 262   4                             (tsense_timer_H_value_max_2 < tsense_timer_value.word))
+ 263   4                          {
+ 264   4                              if(tsense_timer_H_value_max_2 < tsense_timer_H_value_max_1)
+ 265   4                                  tsense_timer_H_value_max_2 = tsense_timer_value.word;
+ 266   4                              else
+ 267   4                                  tsense_timer_H_value_max_1 = tsense_timer_value.word;
+ 268   4                          }
+ 269   4                          */
+ 270   4                      #endif
+ 271   4      
+ 272   4      
+ 273   4                      #ifdef TSENSE_DEBUG_LOG
+ 274   4                      if(tsense_timer_H_array_ix < sizeof(tsense_timer_H_array))
+ 275   4                      {
+ 276   5                          tsense_timer_H_array[tsense_timer_H_array_ix] = tsense_timer_value.word;
+ 277   5                          tsense_timer_H_array_ix++;
+ 278   5                      }
+ 279   4                      #endif
+ 280   4                  }
+ 281   3                  else
+ 282   3                  {
+ 283   4                      tsense_measure_skip_periods = TSENSE_PERIODS_SKIPPED;       // skip next pulse
+ 284   4                      tsense_measure_period_count = TSENSE_PERIOD_COUNT;          // Set num of measured periods
+ 285   4                      tsense_measure_signal_level_flag = TSENSE_SIGNAL_LEVEL_LOW; // Switch measure signal level
+             - timer
+ 286   4                      TSENSE_MCU_TIMER_GATE_SET(TSENSE_COUNT_WHILE_INT0_HIGH);
+ 287   4                  }
+ 288   3              }
+ 289   2              else
+ 290   2              {        
+ 291   3                  if(tsense_measure_period_count)
+ 292   3                  {
+ 293   4                      tsense_timer_value_L += tsense_timer_value.word;            // Add timer value into Low le
+             -vel timer
+ 294   4                      tsense_measure_period_count--;                              // decrement counter
+ 295   4      
+ 296   4                      #if TSENSE_COMPILE_COMPENSATION == 1
+ 297   4                          /*
+ 298   4                          // realtime - get 2 smallest values;
+ 299   4                          if((tsense_timer_value.word < tsense_timer_L_value_min_1) ||
+ 300   4                             (tsense_timer_value.word < tsense_timer_L_value_min_2))
+ 301   4                          {
+ 302   4                              if(tsense_timer_L_value_min_2 > tsense_timer_L_value_min_1)
+ 303   4                                  tsense_timer_L_value_min_2 = tsense_timer_value.word;
+ 304   4                              else
+ 305   4                                  tsense_timer_L_value_min_1 = tsense_timer_value.word;
+ 306   4                          }
+ 307   4                          
+ 308   4                          // realtime - get 2 biggest values;
+ 309   4                          if((tsense_timer_L_value_max_1 < tsense_timer_value.word) ||
+ 310   4                             (tsense_timer_L_value_max_2 < tsense_timer_value.word))
+ 311   4                          {
+ 312   4                              if(tsense_timer_L_value_max_2 < tsense_timer_L_value_max_1)
+ 313   4                                  tsense_timer_L_value_max_2 = tsense_timer_value.word;
+ 314   4                              else
+ 315   4                                  tsense_timer_L_value_max_1 = tsense_timer_value.word;
+ 316   4                          }
+ 317   4                          */
+ 318   4                      #endif
+ 319   4      
+ 320   4                      #ifdef TSENSE_DEBUG_LOG
+ 321   4                      if(tsense_timer_L_array_ix < sizeof(tsense_timer_L_array))
+ 322   4                      {
+ 323   5                          tsense_timer_L_array[tsense_timer_L_array_ix] = tsense_timer_value.word;
+ 324   5                          tsense_timer_L_array_ix++;
+ 325   5                      }
+ 326   4                      #endif
+ 327   4                  }
+ 328   3                  else
+ 329   3                  {
+ 330   4                      tsense_value_pickup_request = 1;
+ 331   4                  }
+ 332   3              }
+ 333   2          }
+ 334   1          else
+ 335   1          {
+ 336   2              tsense_measure_skip_periods--;
+ 337   2          }
+ 338   1      
+ 339   1          // if measure completed
+ 340   1          if(tsense_value_pickup_request)
+ 341   1          {
+ 342   2              TSENSE_MCU_TIMER_STOP();
+ 343   2              TSENSE_MCU_TIMER_RESET();
+ 344   2          }
+ 345   1          else
+ 346   1          {
+ 347   2              TSENSE_MCU_EXTERNAL_INTERRUPT_ENABLE();
+ 348   2          }
+ 349   1      
+ 350   1          tsense_interrupt_counter++;
+ 351   1      }
+ 352          #pragma AREGS
+ 353          
+ 354          
+ 355          // +----------------------------------------------------+
+ 356          // | Reset task buffer variables, fill buffer by zeroes |
+ 357          // +----------------------------------------------------+
+ 358          void tsense_task_buffer_reset()
+ 359          {
+ 360   1          uchar i;
+ 361   1      
+ 362   1          tsense_task_ix_wr  = 0;                    // reset index for task write 
+ 363   1          tsense_task_ix_rd  = 0;                    // reset index for task read 
+ 364   1          tsense_task_in_buf = 0;                    // reset number of pieces in buffer
+ 365   1          tsense_task_missed_flag = 0;               // reset flag of buffer overload
+ 366   1          tsense_task_buf_empty_flag = 0;            // reset flag to generate buffer emptied event
+ 367   1      
+ 368   1          // fill task buffer by zeroes
+ 369   1          for(i = TSENSE_TASK_BUFFER_SIZE-1; i; i--)
+ 370   1          {
+ 371   2              tsense_task_buf[i].sensor_id = 0;
+ 372   2              tsense_task_buf[i].event_id = 0;
+ 373   2          }
+ 374   1      }
+ 375          
+ 376          
+ 377          // +---------------------------------------------+
+ 378          // | Driver init, variables init                 |
+ 379          // +---------------------------------------------+
+ 380          void tsense_init()
+ 381          {
+ 382   1          tsense_task_buffer_reset();
+ 383   1          tsense_mcu_init();                             // Run MCU variation code, counter & interrupt settings
+             - 
+ 384   1      }
+ 385          
+ 386          
+ 387          // +---------------------------------------------+
+ 388          // | Driver process                              |
+ 389          // +---------------------------------------------+
+ 390          void tsense_proc()
+ 391          {
+ 392   1          uchar i;
+ 393   1      
+ 394   1          // Zde zkontrolovat, zda je nejaka uloha v bufferu uloh,
+ 395   1          // pokud ano, vyzvednout ji a cekat na jeji provedeni nebo na vyvolani udalosti
+ 396   1      
+ 397   1          // if any task in buffer
+ 398   1          if(tsense_task_in_buf)
+ 399   1          {
+ 400   2              tsense_task_ix_rd %= TSENSE_TASK_BUFFER_SIZE;    // index rotate
+ 401   2              tsense_get_temperature(tsense_task_buf[tsense_task_ix_rd].sensor_id, tsense_task_buf[tsense_task_i
+             -x_rd].event_id);
+ 402   2              tsense_task_ix_rd++;
+ 403   2              tsense_task_in_buf--;
+ 404   2          }
+ 405   1      
+ 406   1          if(tsense_value_pickup_request)
+ 407   1          {
+ 408   2              tsense_value_pickup_request = 0;
+ 409   2      
+ 410   2              #if TSENSE_COMPILE_COMPENSATION == 1
+ 411   2                  
+ 412   2                  for(i=TSENSE_PERIODS_SKIPPED; i; i--)
+ 413   2                  {
+ 414   3                      if((tsense_timer_H_value_min[i]) && (tsense_timer_H_value_min[i] < 0xFFFF))
+ 415   3                          tsense_timer_value_H -= tsense_timer_H_value_min[i];
+ 416   3      
+ 417   3                      if((tsense_timer_H_value_max[i]) && (tsense_timer_H_value_max[i] < 0xFFFF))
+ 418   3                          tsense_timer_value_H -= tsense_timer_H_value_min[i];
+ 419   3      
+ 420   3                      if((tsense_timer_L_value_min[i]) && (tsense_timer_L_value_min[i] < 0xFFFF))
+ 421   3                          tsense_timer_value_L -= tsense_timer_L_value_min[i];
+ 422   3      
+ 423   3                      if((tsense_timer_L_value_max[i]) && (tsense_timer_L_value_max[i] < 0xFFFF))
+ 424   3                          tsense_timer_value_L -= tsense_timer_L_value_max[i];
+ 425   3                  }
+ 426   2          
+ 427   2                  tsense_timer_value_H /= (TSENSE_PERIOD_COUNT - 4);                // calc average time of one 
+             -pulse
+ 428   2                  tsense_timer_value_L /= (TSENSE_PERIOD_COUNT - 4);                // calc average time of one 
+             -pulse
+ 429   2              #else
+                          tsense_timer_value_H /= TSENSE_PERIOD_COUNT;                      // calc average time of one 
+             -pulse
+                          tsense_timer_value_L /= TSENSE_PERIOD_COUNT;
+                      #endif
+ 433   2      
+ 434   2              tsense_temperature =  (float) tsense_timer_value_L;
+ 435   2              tsense_temperature /= (float) tsense_timer_value_H;
+ 436   2              tsense_temperature *= (float) 212.76596;
+ 437   2              tsense_temperature -= (float)  68.08511;
+ 438   2      
+ 439   2              //tsense_timer_value_H /= TSENSE_PERIOD_COUNT;                // calc time of one pulse
+ 440   2              //tsense_timer_value_L /= TSENSE_PERIOD_COUNT;
+ 441   2              //tsense_timer_value_H -= tsense_timer_value_L;
+ 442   2              /*
+ 443   2              tsense_temperature =  (ulong) tsense_timer_value_L * 1000;
+ 444   2              tsense_temperature /= (ulong) tsense_timer_value_H;
+ 445   2              tsense_temperature *= (ulong) 21277;
+ 446   2              tsense_temperature -= (ulong) 6809;
+ 447   2              */
+ 448   2      
+ 449   2              // t = (T1/T0 - 0.32) / 0.0047
+ 450   2              // t = T1 / T0 * 212,77 - 68,09  
+ 451   2              // 100t = TL / TH * 21277 - 6809
+ 452   2      
+ 453   2              /*
+ 454   2              // T0 = H
+ 455   2              // T1/T0 = 0.32 + 0.0047 * t
+ 456   2              // t = (T1/T0 - 0.32) / 0.0047
+ 457   2              // 603                         985
+ 458   2              tsense_timer_value_H.word -= tsense_timer_value_L.word;
+ 459   2              tsense_temperature = tsense_timer_value_L.word / tsense_timer_value_H.word;
+ 460   2              tsense_temperature -= 0.32;
+ 461   2              tsense_temperature /= 0.0047;
+ 462   2              */
+ 463   2      
+ 464   2              event_send(EVENT_TSENSE_FINISH, 0);
+ 465   2          }
+ 466   1      
+ 467   1          /*
+ 468   1          if(tsense_measure_state_flag == TSENSE_MEASURING_RUNNING)
+ 469   1          {
+ 470   1              if(!TIMER_TSENSE)
+ 471   1              {
+ 472   1                  //tsense_stop();
+ 473   1                  tsense_temperature = 0;
+ 474   1                  event_send(EVENT_TSENSE_ERROR, 0);
+ 475   1              }
+ 476   1          }
+ 477   1          */
+ 478   1      
+ 479   1      }
+ 480          
+C51 COMPILER V8.05a   TSENSE                                                               04/16/2009 20:53:45 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _tsense_timer_config (BEGIN)
+                                           ; SOURCE LINE # 96
+;---- Variable 'mode' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 97
+                                           ; SOURCE LINE # 105
+0000 A200        R     MOV     C,device_type
+0002 E4                CLR     A
+0003 33                RLC     A
+0004 25E0              ADD     A,ACC
+0006 25E0              ADD     A,ACC
+0008 FE                MOV     R6,A
+0009 A200        R     MOV     C,gate
+000B E4                CLR     A
+000C 33                RLC     A
+000D 33                RLC     A
+000E 33                RLC     A
+000F 33                RLC     A
+0010 54F8              ANL     A,#0F8H
+0012 4E                ORL     A,R6
+0013 4F                ORL     A,R7
+0014 540F              ANL     A,#0FH
+0016 FF                MOV     R7,A
+0017 E589              MOV     A,TMOD
+0019 54F0              ANL     A,#0F0H
+001B 4F                ORL     A,R7
+001C F589              MOV     TMOD,A
+                                           ; SOURCE LINE # 106
+001E 22                RET     
+             ; FUNCTION _tsense_timer_config (END)
+
+             ; FUNCTION tsense_mcu_init (BEGIN)
+                                           ; SOURCE LINE # 112
+                                           ; SOURCE LINE # 113
+                                           ; SOURCE LINE # 114
+0000 C289              CLR     IE0
+                                           ; SOURCE LINE # 115
+0002 C2A8              CLR     EX0
+                                           ; SOURCE LINE # 117
+0004 D288              SETB    IT0
+                                           ; SOURCE LINE # 118
+0006 C2A9              CLR     ET0
+                                           ; SOURCE LINE # 119
+0008 C28C              CLR     TR0
+                                           ; SOURCE LINE # 120
+000A C28D              CLR     TF0
+                                           ; SOURCE LINE # 123
+000C 43B701            ORL     IPH0,#01H
+                                           ; SOURCE LINE # 124
+000F 43B801            ORL     IPL0,#01H
+                                           ; SOURCE LINE # 141
+0012 22                RET     
+             ; FUNCTION tsense_mcu_init (END)
+
+             ; FUNCTION _tsense_add_task (BEGIN)
+                                           ; SOURCE LINE # 109
+;---- Variable 'event_id' assigned to Register 'R5' ----
+;---- Variable 'sensor_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 110
+                                           ; SOURCE LINE # 111
+0000 7800        R     MOV     R0,#LOW tsense_task_in_buf
+0002 E6                MOV     A,@R0
+0003 C3                CLR     C
+0004 9408              SUBB    A,#08H
+0006 5028              JNC     ?C0003
+                                           ; SOURCE LINE # 112
+                                           ; SOURCE LINE # 113
+0008 7800        R     MOV     R0,#LOW tsense_task_ix_wr
+000A E6                MOV     A,@R0
+000B 5407              ANL     A,#07H
+000D FE                MOV     R6,A
+000E F6                MOV     @R0,A
+                                           ; SOURCE LINE # 114
+000F 25E0              ADD     A,ACC
+0011 2400        R     ADD     A,#LOW tsense_task_buf
+0013 F582              MOV     DPL,A
+0015 E4                CLR     A
+0016 3400        R     ADDC    A,#HIGH tsense_task_buf
+0018 F583              MOV     DPH,A
+001A EF                MOV     A,R7
+001B F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 115
+001C EE                MOV     A,R6
+001D 25E0              ADD     A,ACC
+001F 2400        R     ADD     A,#LOW tsense_task_buf+01H
+0021 F582              MOV     DPL,A
+0023 E4                CLR     A
+0024 3400        R     ADDC    A,#HIGH tsense_task_buf+01H
+0026 F583              MOV     DPH,A
+0028 ED                MOV     A,R5
+0029 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 116
+002A 06                INC     @R0
+                                           ; SOURCE LINE # 117
+002B 7800        R     MOV     R0,#LOW tsense_task_in_buf
+002D 06                INC     @R0
+                                           ; SOURCE LINE # 118
+002E D3                SETB    C
+002F 22                RET     
+                                           ; SOURCE LINE # 119
+0030         ?C0003:
+                                           ; SOURCE LINE # 121
+0030 C3                CLR     C
+                                           ; SOURCE LINE # 122
+0031         ?C0004:
+0031 22                RET     
+             ; FUNCTION _tsense_add_task (END)
+
+             ; FUNCTION tsense_sensor_live_test_ok (BEGIN)
+                                           ; SOURCE LINE # 128
+                                           ; SOURCE LINE # 129
+                                           ; SOURCE LINE # 130
+0000 750003      E     MOV     timers+04H,#03H
+0003 7500E8      E     MOV     timers+05H,#0E8H
+0006         ?C0006:
+                                           ; SOURCE LINE # 133
+0006 30B208            JNB     INT0,?C0010
+                                           ; SOURCE LINE # 134
+0009 E500        E     MOV     A,timers+05H
+000B 4500        E     ORL     A,timers+04H
+000D 70F7              JNZ     ?C0006
+                                           ; SOURCE LINE # 135
+000F C3                CLR     C
+0010 22                RET     
+0011         ?C0010:
+                                           ; SOURCE LINE # 138
+0011 E500        E     MOV     A,timers+05H
+0013 4500        E     ORL     A,timers+04H
+0015 6006              JZ      ?C0011
+                                           ; SOURCE LINE # 139
+0017 A2B2              MOV     C,INT0
+0019 B3                CPL     C
+001A 50F5              JNC     ?C0010
+                                           ; SOURCE LINE # 140
+001C 22                RET     
+001D         ?C0011:
+                                           ; SOURCE LINE # 142
+001D C3                CLR     C
+                                           ; SOURCE LINE # 143
+001E         ?C0009:
+001E 22                RET     
+             ; FUNCTION tsense_sensor_live_test_ok (END)
+
+             ; FUNCTION _tsense_get_temperature (BEGIN)
+                                           ; SOURCE LINE # 149
+;---- Variable 'sensor_id' assigned to Register 'R4' ----
+0000 AC07              MOV     R4,AR7
+;---- Variable 'event_id' assigned to Register 'R5' ----
+                                           ; SOURCE LINE # 150
+                                           ; SOURCE LINE # 162
+0002 8C00        R     MOV     tsense_sensor_id,R4
+                                           ; SOURCE LINE # 163
+0004 8D00        R     MOV     tsense_event_id,R5
+                                           ; SOURCE LINE # 165
+0006 C200        R     CLR     tsense_value_pickup_request
+                                           ; SOURCE LINE # 166
+0008 E4                CLR     A
+0009 F500        R     MOV     tsense_interrupt_counter,A
+                                           ; SOURCE LINE # 168
+000B C200        R     CLR     ?_tsense_timer_config?BIT
+000D D200        R     SETB    ?_tsense_timer_config?BIT+01H
+000F 7F01              MOV     R7,#01H
+0011 120000      R     LCALL   _tsense_timer_config
+                                           ; SOURCE LINE # 170
+0014 C28D              CLR     TF0
+                                           ; SOURCE LINE # 171
+0016 5389F7            ANL     TMOD,#0F7H
+                                           ; SOURCE LINE # 173
+0019 750019      R     MOV     tsense_measure_period_count,#019H
+                                           ; SOURCE LINE # 174
+001C D200        R     SETB    tsense_measure_signal_level_flag
+                                           ; SOURCE LINE # 176
+001E E4                CLR     A
+001F F500        R     MOV     tsense_timer_value_H,A
+0021 F500        R     MOV     tsense_timer_value_H+01H,A
+                                           ; SOURCE LINE # 177
+0023 F500        R     MOV     tsense_timer_value_L,A
+0025 F500        R     MOV     tsense_timer_value_L+01H,A
+                                           ; SOURCE LINE # 180
+0027 F500        R     MOV     tsense_timer_H_array_ix,A
+                                           ; SOURCE LINE # 181
+0029 F500        R     MOV     tsense_timer_L_array_ix,A
+                                           ; SOURCE LINE # 183
+;---- Variable 'i' assigned to Register 'R7' ----
+002B 7F02              MOV     R7,#02H
+002D         ?C0013:
+                                           ; SOURCE LINE # 184
+                                           ; SOURCE LINE # 185
+002D EF                MOV     A,R7
+002E 25E0              ADD     A,ACC
+0030 2400        R     ADD     A,#LOW tsense_timer_H_value_min
+0032 F8                MOV     R0,A
+0033 74FF              MOV     A,#0FFH
+0035 F6                MOV     @R0,A
+0036 08                INC     R0
+0037 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 186
+0038 EF                MOV     A,R7
+0039 25E0              ADD     A,ACC
+003B 2400        R     ADD     A,#LOW tsense_timer_H_value_max
+003D F8                MOV     R0,A
+003E E4                CLR     A
+003F F6                MOV     @R0,A
+0040 08                INC     R0
+0041 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 187
+0042 EF                MOV     A,R7
+0043 25E0              ADD     A,ACC
+0045 2400        R     ADD     A,#LOW tsense_timer_L_value_min
+0047 F8                MOV     R0,A
+0048 74FF              MOV     A,#0FFH
+004A F6                MOV     @R0,A
+004B 08                INC     R0
+004C F6                MOV     @R0,A
+                                           ; SOURCE LINE # 188
+004D EF                MOV     A,R7
+004E 25E0              ADD     A,ACC
+0050 2400        R     ADD     A,#LOW tsense_timer_L_value_max
+0052 F8                MOV     R0,A
+0053 E4                CLR     A
+0054 F6                MOV     @R0,A
+0055 08                INC     R0
+0056 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 189
+0057 DFD4              DJNZ    R7,?C0013
+0059         ?C0014:
+                                           ; SOURCE LINE # 192
+0059 750002      R     MOV     tsense_measure_skip_periods,#02H
+                                           ; SOURCE LINE # 193
+005C C28C              CLR     TR0
+                                           ; SOURCE LINE # 194
+005E E4                CLR     A
+005F F58C              MOV     TH0,A
+0061 F58A              MOV     TL0,A
+                                           ; SOURCE LINE # 197
+0063 120000      R     LCALL   tsense_sensor_live_test_ok
+0066 5003              JNC     ?C0016
+                                           ; SOURCE LINE # 198
+                                           ; SOURCE LINE # 199
+0068 D2A8              SETB    EX0
+                                           ; SOURCE LINE # 200
+006A 22                RET     
+                                           ; SOURCE LINE # 201
+006B         ?C0016:
+                                           ; SOURCE LINE # 203
+                                           ; SOURCE LINE # 204
+006B EC                MOV     A,R4
+006C FD                MOV     R5,A
+006D 7C00              MOV     R4,#00H
+006F 7F07              MOV     R7,#07H
+0071 120000      E     LCALL   _event_send
+                                           ; SOURCE LINE # 205
+0074 C3                CLR     C
+0075 22                RET     
+                                           ; SOURCE LINE # 206
+             ; FUNCTION _tsense_get_temperature (END)
+
+             ; FUNCTION tsense_interrupt_ex0 (BEGIN)
+0000 C0E0              PUSH    ACC
+0002 C0D0              PUSH    PSW
+0004 75D008            MOV     PSW,#08H
+                                           ; SOURCE LINE # 217
+                                           ; SOURCE LINE # 219
+                                           ; SOURCE LINE # 221
+0007 C2A8              CLR     EX0
+                                           ; SOURCE LINE # 222
+0009 C28C              CLR     TR0
+                                           ; SOURCE LINE # 223
+000B 858A00      R     MOV     tsense_timer_value+01H,TL0
+                                           ; SOURCE LINE # 224
+000E 858C00      R     MOV     tsense_timer_value,TH0
+                                           ; SOURCE LINE # 225
+0011 758C00            MOV     TH0,#00H
+0014 758A00            MOV     TL0,#00H
+0017 D28C              SETB    TR0
+                                           ; SOURCE LINE # 227
+0019 E500        R     MOV     A,tsense_measure_skip_periods
+001B 6003              JZ      $ + 5H
+001D 020000      R     LJMP    ?C0019
+                                           ; SOURCE LINE # 228
+                                           ; SOURCE LINE # 229
+0020 300072            JNB     tsense_measure_signal_level_flag,?C0020
+                                           ; SOURCE LINE # 230
+                                           ; SOURCE LINE # 231
+0023 E500        R     MOV     A,tsense_measure_period_count
+0025 6061              JZ      ?C0021
+                                           ; SOURCE LINE # 232
+                                           ; SOURCE LINE # 233
+0027 E500        R     MOV     A,tsense_timer_value+01H
+0029 2500        R     ADD     A,tsense_timer_value_H+01H
+002B F500        R     MOV     tsense_timer_value_H+01H,A
+002D E500        R     MOV     A,tsense_timer_value
+002F 3500        R     ADDC    A,tsense_timer_value_H
+0031 F500        R     MOV     tsense_timer_value_H,A
+                                           ; SOURCE LINE # 234
+0033 1500        R     DEC     tsense_measure_period_count
+                                           ; SOURCE LINE # 238
+;---- Variable 'i' assigned to Register 'R7' ----
+0035 7F02              MOV     R7,#02H
+0037         ?C0022:
+0037 EF                MOV     A,R7
+0038 14                DEC     A
+0039 6036              JZ      ?C0023
+                                           ; SOURCE LINE # 239
+                                           ; SOURCE LINE # 240
+003B EF                MOV     A,R7
+003C 25E0              ADD     A,ACC
+003E 2400        R     ADD     A,#LOW tsense_timer_H_value_min
+0040 F8                MOV     R0,A
+0041 E6                MOV     A,@R0
+0042 FC                MOV     R4,A
+0043 08                INC     R0
+0044 E6                MOV     A,@R0
+0045 FD                MOV     R5,A
+0046 C3                CLR     C
+0047 E500        R     MOV     A,tsense_timer_value+01H
+0049 9D                SUBB    A,R5
+004A E500        R     MOV     A,tsense_timer_value
+004C 9C                SUBB    A,R4
+004D 501F              JNC     ?C0024
+                                           ; SOURCE LINE # 241
+                                           ; SOURCE LINE # 242
+004F EF                MOV     A,R7
+0050 25E0              ADD     A,ACC
+0052 2400        R     ADD     A,#LOW tsense_timer_H_value_min+0FFFFH
+0054 F9                MOV     R1,A
+0055 D3                SETB    C
+0056 E7                MOV     A,@R1
+0057 9D                SUBB    A,R5
+0058 19                DEC     R1
+0059 E7                MOV     A,@R1
+005A 9C                SUBB    A,R4
+005B EF                MOV     A,R7
+005C 4006              JC      ?C0026
+                                           ; SOURCE LINE # 243
+005E 25E0              ADD     A,ACC
+0060 2400        R     ADD     A,#LOW tsense_timer_H_value_min+0FFFEH
+0062 8004              SJMP    ?C0053
+0064         ?C0026:
+                                           ; SOURCE LINE # 245
+0064 25E0              ADD     A,ACC
+0066 2400        R     ADD     A,#LOW tsense_timer_H_value_min
+0068         ?C0053:
+0068 F8                MOV     R0,A
+0069 A600        R     MOV     @R0,tsense_timer_value
+006B 08                INC     R0
+006C A600        R     MOV     @R0,tsense_timer_value+01H
+                                           ; SOURCE LINE # 246
+                                           ; SOURCE LINE # 247
+006E         ?C0024:
+006E 1F                DEC     R7
+006F 80C6              SJMP    ?C0022
+0071         ?C0023:
+                                           ; SOURCE LINE # 274
+0071 E500        R     MOV     A,tsense_timer_H_array_ix
+0073 C3                CLR     C
+0074 9432              SUBB    A,#032H
+0076 504C              JNC     ?C0034
+                                           ; SOURCE LINE # 275
+                                           ; SOURCE LINE # 276
+0078 E500        R     MOV     A,tsense_timer_H_array_ix
+007A 25E0              ADD     A,ACC
+007C 2400        R     ADD     A,#LOW tsense_timer_H_array
+007E F8                MOV     R0,A
+007F A600        R     MOV     @R0,tsense_timer_value
+0081 08                INC     R0
+0082 A600        R     MOV     @R0,tsense_timer_value+01H
+                                           ; SOURCE LINE # 277
+0084 0500        R     INC     tsense_timer_H_array_ix
+                                           ; SOURCE LINE # 278
+                                           ; SOURCE LINE # 280
+0086 803C              SJMP    ?C0034
+0088         ?C0021:
+                                           ; SOURCE LINE # 282
+                                           ; SOURCE LINE # 283
+0088 750002      R     MOV     tsense_measure_skip_periods,#02H
+                                           ; SOURCE LINE # 284
+008B 750019      R     MOV     tsense_measure_period_count,#019H
+                                           ; SOURCE LINE # 285
+008E C200        R     CLR     tsense_measure_signal_level_flag
+                                           ; SOURCE LINE # 286
+0090 438908            ORL     TMOD,#08H
+                                           ; SOURCE LINE # 287
+                                           ; SOURCE LINE # 288
+0093 802F              SJMP    ?C0034
+0095         ?C0020:
+                                           ; SOURCE LINE # 290
+                                           ; SOURCE LINE # 291
+0095 E500        R     MOV     A,tsense_measure_period_count
+0097 6025              JZ      ?C0031
+                                           ; SOURCE LINE # 292
+                                           ; SOURCE LINE # 293
+0099 E500        R     MOV     A,tsense_timer_value+01H
+009B 2500        R     ADD     A,tsense_timer_value_L+01H
+009D F500        R     MOV     tsense_timer_value_L+01H,A
+009F E500        R     MOV     A,tsense_timer_value
+00A1 3500        R     ADDC    A,tsense_timer_value_L
+00A3 F500        R     MOV     tsense_timer_value_L,A
+                                           ; SOURCE LINE # 294
+00A5 1500        R     DEC     tsense_measure_period_count
+                                           ; SOURCE LINE # 321
+00A7 E500        R     MOV     A,tsense_timer_L_array_ix
+00A9 C3                CLR     C
+00AA 9432              SUBB    A,#032H
+00AC 5016              JNC     ?C0034
+                                           ; SOURCE LINE # 322
+                                           ; SOURCE LINE # 323
+00AE E500        R     MOV     A,tsense_timer_L_array_ix
+00B0 25E0              ADD     A,ACC
+00B2 2400        R     ADD     A,#LOW tsense_timer_L_array
+00B4 F8                MOV     R0,A
+00B5 A600        R     MOV     @R0,tsense_timer_value
+00B7 08                INC     R0
+00B8 A600        R     MOV     @R0,tsense_timer_value+01H
+                                           ; SOURCE LINE # 324
+00BA 0500        R     INC     tsense_timer_L_array_ix
+                                           ; SOURCE LINE # 325
+                                           ; SOURCE LINE # 327
+00BC 8006              SJMP    ?C0034
+00BE         ?C0031:
+                                           ; SOURCE LINE # 329
+                                           ; SOURCE LINE # 330
+00BE D200        R     SETB    tsense_value_pickup_request
+                                           ; SOURCE LINE # 331
+                                           ; SOURCE LINE # 332
+                                           ; SOURCE LINE # 333
+00C0 8002              SJMP    ?C0034
+00C2         ?C0019:
+                                           ; SOURCE LINE # 335
+                                           ; SOURCE LINE # 336
+00C2 1500        R     DEC     tsense_measure_skip_periods
+                                           ; SOURCE LINE # 337
+00C4         ?C0034:
+                                           ; SOURCE LINE # 340
+00C4 30000A            JNB     tsense_value_pickup_request,?C0035
+                                           ; SOURCE LINE # 341
+                                           ; SOURCE LINE # 342
+00C7 C28C              CLR     TR0
+                                           ; SOURCE LINE # 343
+00C9 758C00            MOV     TH0,#00H
+00CC 758A00            MOV     TL0,#00H
+                                           ; SOURCE LINE # 344
+00CF 8002              SJMP    ?C0036
+00D1         ?C0035:
+                                           ; SOURCE LINE # 346
+                                           ; SOURCE LINE # 347
+00D1 D2A8              SETB    EX0
+                                           ; SOURCE LINE # 348
+00D3         ?C0036:
+                                           ; SOURCE LINE # 350
+00D3 0500        R     INC     tsense_interrupt_counter
+                                           ; SOURCE LINE # 351
+00D5 D0D0              POP     PSW
+00D7 D0E0              POP     ACC
+00D9 32                RETI    
+             ; FUNCTION tsense_interrupt_ex0 (END)
+
+             ; FUNCTION tsense_task_buffer_reset (BEGIN)
+                                           ; SOURCE LINE # 358
+                                           ; SOURCE LINE # 359
+                                           ; SOURCE LINE # 362
+0000 E4                CLR     A
+0001 7800        R     MOV     R0,#LOW tsense_task_ix_wr
+0003 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 363
+0004 18                DEC     R0
+0005 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 364
+0006 18                DEC     R0
+0007 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 365
+0008 C200        R     CLR     tsense_task_missed_flag
+                                           ; SOURCE LINE # 366
+000A C200        R     CLR     tsense_task_buf_empty_flag
+                                           ; SOURCE LINE # 369
+;---- Variable 'i' assigned to Register 'R7' ----
+000C 7F07              MOV     R7,#07H
+000E         ?C0038:
+                                           ; SOURCE LINE # 370
+                                           ; SOURCE LINE # 371
+000E EF                MOV     A,R7
+000F 25E0              ADD     A,ACC
+0011 2400        R     ADD     A,#LOW tsense_task_buf
+0013 F582              MOV     DPL,A
+0015 E4                CLR     A
+0016 3400        R     ADDC    A,#HIGH tsense_task_buf
+0018 F583              MOV     DPH,A
+001A E4                CLR     A
+001B F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 372
+001C EF                MOV     A,R7
+001D 25E0              ADD     A,ACC
+001F 2400        R     ADD     A,#LOW tsense_task_buf+01H
+0021 F582              MOV     DPL,A
+0023 E4                CLR     A
+0024 3400        R     ADDC    A,#HIGH tsense_task_buf+01H
+0026 F583              MOV     DPH,A
+0028 E4                CLR     A
+0029 F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 373
+002A DFE2              DJNZ    R7,?C0038
+                                           ; SOURCE LINE # 374
+002C         ?C0041:
+002C 22                RET     
+             ; FUNCTION tsense_task_buffer_reset (END)
+
+             ; FUNCTION tsense_init (BEGIN)
+                                           ; SOURCE LINE # 380
+                                           ; SOURCE LINE # 381
+                                           ; SOURCE LINE # 382
+0000 120000      R     LCALL   tsense_task_buffer_reset
+                                           ; SOURCE LINE # 383
+0003 020000      R     LJMP    tsense_mcu_init
+             ; FUNCTION tsense_init (END)
+
+             ; FUNCTION tsense_proc (BEGIN)
+                                           ; SOURCE LINE # 390
+                                           ; SOURCE LINE # 391
+                                           ; SOURCE LINE # 398
+0000 7800        R     MOV     R0,#LOW tsense_task_in_buf
+0002 E6                MOV     A,@R0
+0003 602A              JZ      ?C0043
+                                           ; SOURCE LINE # 399
+                                           ; SOURCE LINE # 400
+0005 08                INC     R0
+0006 E6                MOV     A,@R0
+0007 5407              ANL     A,#07H
+0009 F6                MOV     @R0,A
+                                           ; SOURCE LINE # 401
+000A E6                MOV     A,@R0
+000B FE                MOV     R6,A
+000C 25E0              ADD     A,ACC
+000E 2400        R     ADD     A,#LOW tsense_task_buf
+0010 F582              MOV     DPL,A
+0012 E4                CLR     A
+0013 3400        R     ADDC    A,#HIGH tsense_task_buf
+0015 F583              MOV     DPH,A
+0017 E0                MOVX    A,@DPTR
+0018 FF                MOV     R7,A
+0019 EE                MOV     A,R6
+001A 25E0              ADD     A,ACC
+001C 2400        R     ADD     A,#LOW tsense_task_buf+01H
+001E F582              MOV     DPL,A
+0020 E4                CLR     A
+0021 3400        R     ADDC    A,#HIGH tsense_task_buf+01H
+0023 F583              MOV     DPH,A
+0025 E0                MOVX    A,@DPTR
+0026 FD                MOV     R5,A
+0027 120000      R     LCALL   _tsense_get_temperature
+                                           ; SOURCE LINE # 402
+002A 7800        R     MOV     R0,#LOW tsense_task_ix_rd
+002C 06                INC     @R0
+                                           ; SOURCE LINE # 403
+002D 18                DEC     R0
+002E 16                DEC     @R0
+                                           ; SOURCE LINE # 404
+002F         ?C0043:
+                                           ; SOURCE LINE # 406
+002F 200003      R     JB      tsense_value_pickup_request,$ + 6H
+0032 020000      R     LJMP    ?C0052
+                                           ; SOURCE LINE # 407
+                                           ; SOURCE LINE # 408
+0035 C200        R     CLR     tsense_value_pickup_request
+                                           ; SOURCE LINE # 412
+;---- Variable 'i' assigned to Register 'R7' ----
+0037 7F02              MOV     R7,#02H
+0039         ?C0045:
+                                           ; SOURCE LINE # 413
+                                           ; SOURCE LINE # 414
+0039 EF                MOV     A,R7
+003A 25E0              ADD     A,ACC
+003C 2400        R     ADD     A,#LOW tsense_timer_H_value_min
+003E F8                MOV     R0,A
+003F E6                MOV     A,@R0
+0040 FC                MOV     R4,A
+0041 08                INC     R0
+0042 E6                MOV     A,@R0
+0043 FD                MOV     R5,A
+0044 4C                ORL     A,R4
+0045 6014              JZ      ?C0048
+0047 C3                CLR     C
+0048 ED                MOV     A,R5
+0049 94FF              SUBB    A,#0FFH
+004B EC                MOV     A,R4
+004C 94FF              SUBB    A,#0FFH
+004E 500B              JNC     ?C0048
+                                           ; SOURCE LINE # 415
+0050 C3                CLR     C
+0051 E500        R     MOV     A,tsense_timer_value_H+01H
+0053 9D                SUBB    A,R5
+0054 F500        R     MOV     tsense_timer_value_H+01H,A
+0056 E500        R     MOV     A,tsense_timer_value_H
+0058 9C                SUBB    A,R4
+0059 F500        R     MOV     tsense_timer_value_H,A
+005B         ?C0048:
+                                           ; SOURCE LINE # 417
+005B EF                MOV     A,R7
+005C 25E0              ADD     A,ACC
+005E 2400        R     ADD     A,#LOW tsense_timer_H_value_max
+0060 F8                MOV     R0,A
+0061 E6                MOV     A,@R0
+0062 FC                MOV     R4,A
+0063 08                INC     R0
+0064 E6                MOV     A,@R0
+0065 FD                MOV     R5,A
+0066 4C                ORL     A,R4
+0067 601B              JZ      ?C0049
+0069 C3                CLR     C
+006A ED                MOV     A,R5
+006B 94FF              SUBB    A,#0FFH
+006D EC                MOV     A,R4
+006E 94FF              SUBB    A,#0FFH
+0070 5012              JNC     ?C0049
+                                           ; SOURCE LINE # 418
+0072 EF                MOV     A,R7
+0073 25E0              ADD     A,ACC
+0075 2400        R     ADD     A,#LOW tsense_timer_H_value_min+01H
+0077 F8                MOV     R0,A
+0078 C3                CLR     C
+0079 E500        R     MOV     A,tsense_timer_value_H+01H
+007B 96                SUBB    A,@R0
+007C F500        R     MOV     tsense_timer_value_H+01H,A
+007E E500        R     MOV     A,tsense_timer_value_H
+0080 18                DEC     R0
+0081 96                SUBB    A,@R0
+0082 F500        R     MOV     tsense_timer_value_H,A
+0084         ?C0049:
+                                           ; SOURCE LINE # 420
+0084 EF                MOV     A,R7
+0085 25E0              ADD     A,ACC
+0087 2400        R     ADD     A,#LOW tsense_timer_L_value_min
+0089 F8                MOV     R0,A
+008A E6                MOV     A,@R0
+008B FC                MOV     R4,A
+008C 08                INC     R0
+008D E6                MOV     A,@R0
+008E FD                MOV     R5,A
+008F 4C                ORL     A,R4
+0090 6014              JZ      ?C0050
+0092 C3                CLR     C
+0093 ED                MOV     A,R5
+0094 94FF              SUBB    A,#0FFH
+0096 EC                MOV     A,R4
+0097 94FF              SUBB    A,#0FFH
+0099 500B              JNC     ?C0050
+                                           ; SOURCE LINE # 421
+009B C3                CLR     C
+009C E500        R     MOV     A,tsense_timer_value_L+01H
+009E 9D                SUBB    A,R5
+009F F500        R     MOV     tsense_timer_value_L+01H,A
+00A1 E500        R     MOV     A,tsense_timer_value_L
+00A3 9C                SUBB    A,R4
+00A4 F500        R     MOV     tsense_timer_value_L,A
+00A6         ?C0050:
+                                           ; SOURCE LINE # 423
+00A6 EF                MOV     A,R7
+00A7 25E0              ADD     A,ACC
+00A9 2400        R     ADD     A,#LOW tsense_timer_L_value_max
+00AB F8                MOV     R0,A
+00AC E6                MOV     A,@R0
+00AD FC                MOV     R4,A
+00AE 08                INC     R0
+00AF E6                MOV     A,@R0
+00B0 FD                MOV     R5,A
+00B1 4C                ORL     A,R4
+00B2 6014              JZ      ?C0047
+00B4 C3                CLR     C
+00B5 ED                MOV     A,R5
+00B6 94FF              SUBB    A,#0FFH
+00B8 EC                MOV     A,R4
+00B9 94FF              SUBB    A,#0FFH
+00BB 500B              JNC     ?C0047
+                                           ; SOURCE LINE # 424
+00BD C3                CLR     C
+00BE E500        R     MOV     A,tsense_timer_value_L+01H
+00C0 9D                SUBB    A,R5
+00C1 F500        R     MOV     tsense_timer_value_L+01H,A
+00C3 E500        R     MOV     A,tsense_timer_value_L
+00C5 9C                SUBB    A,R4
+00C6 F500        R     MOV     tsense_timer_value_L,A
+                                           ; SOURCE LINE # 425
+00C8         ?C0047:
+00C8 1F                DEC     R7
+00C9 EF                MOV     A,R7
+00CA 6003              JZ      $ + 5H
+00CC 020000      R     LJMP    ?C0045
+00CF         ?C0046:
+                                           ; SOURCE LINE # 427
+00CF AE00        R     MOV     R6,tsense_timer_value_H
+00D1 AF00        R     MOV     R7,tsense_timer_value_H+01H
+00D3 7C00              MOV     R4,#00H
+00D5 7D15              MOV     R5,#015H
+00D7 120000      E     LCALL   ?C?UIDIV
+00DA 8E00        R     MOV     tsense_timer_value_H,R6
+00DC 8F00        R     MOV     tsense_timer_value_H+01H,R7
+                                           ; SOURCE LINE # 428
+00DE AE00        R     MOV     R6,tsense_timer_value_L
+00E0 AF00        R     MOV     R7,tsense_timer_value_L+01H
+00E2 7C00              MOV     R4,#00H
+00E4 7D15              MOV     R5,#015H
+00E6 120000      E     LCALL   ?C?UIDIV
+00E9 8E00        R     MOV     tsense_timer_value_L,R6
+00EB 8F00        R     MOV     tsense_timer_value_L+01H,R7
+                                           ; SOURCE LINE # 434
+00ED AC00        R     MOV     R4,tsense_timer_value_L
+00EF AD00        R     MOV     R5,tsense_timer_value_L+01H
+00F1 E4                CLR     A
+00F2 120000      E     LCALL   ?C?FCASTI
+00F5 8F00        R     MOV     tsense_temperature+03H,R7
+00F7 8E00        R     MOV     tsense_temperature+02H,R6
+00F9 8D00        R     MOV     tsense_temperature+01H,R5
+00FB 8C00        R     MOV     tsense_temperature,R4
+                                           ; SOURCE LINE # 435
+00FD C004              PUSH    AR4
+00FF C005              PUSH    AR5
+0101 C006              PUSH    AR6
+0103 C007              PUSH    AR7
+0105 AC00        R     MOV     R4,tsense_timer_value_H
+0107 AD00        R     MOV     R5,tsense_timer_value_H+01H
+0109 E4                CLR     A
+010A 120000      E     LCALL   ?C?FCASTI
+010D A804              MOV     R0,AR4
+010F A905              MOV     R1,AR5
+0111 AA06              MOV     R2,AR6
+0113 AB07              MOV     R3,AR7
+0115 D007              POP     AR7
+0117 D006              POP     AR6
+0119 D005              POP     AR5
+011B D004              POP     AR4
+011D 120000      E     LCALL   ?C?FPDIV
+0120 8F00        R     MOV     tsense_temperature+03H,R7
+0122 8E00        R     MOV     tsense_temperature+02H,R6
+0124 8D00        R     MOV     tsense_temperature+01H,R5
+0126 8C00        R     MOV     tsense_temperature,R4
+                                           ; SOURCE LINE # 436
+0128 7B16              MOV     R3,#016H
+012A 7AC4              MOV     R2,#0C4H
+012C 7954              MOV     R1,#054H
+012E 7843              MOV     R0,#043H
+0130 120000      E     LCALL   ?C?FPMUL
+0133 8F00        R     MOV     tsense_temperature+03H,R7
+0135 8E00        R     MOV     tsense_temperature+02H,R6
+0137 8D00        R     MOV     tsense_temperature+01H,R5
+0139 8C00        R     MOV     tsense_temperature,R4
+                                           ; SOURCE LINE # 437
+013B 7B94              MOV     R3,#094H
+013D 7A2B              MOV     R2,#02BH
+013F 7988              MOV     R1,#088H
+0141 7842              MOV     R0,#042H
+0143 120000      E     LCALL   ?C?FPSUB
+0146 8F00        R     MOV     tsense_temperature+03H,R7
+0148 8E00        R     MOV     tsense_temperature+02H,R6
+014A 8D00        R     MOV     tsense_temperature+01H,R5
+014C 8C00        R     MOV     tsense_temperature,R4
+                                           ; SOURCE LINE # 464
+014E E4                CLR     A
+014F FD                MOV     R5,A
+0150 FC                MOV     R4,A
+0151 7F06              MOV     R7,#06H
+0153 120000      E     LCALL   _event_send
+                                           ; SOURCE LINE # 465
+                                           ; SOURCE LINE # 479
+0156         ?C0052:
+0156 22                RET     
+             ; FUNCTION tsense_proc (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    864    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =     16    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     17    ----
+   IDATA SIZE       =    119    ----
+   BIT SIZE         =      4       2
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

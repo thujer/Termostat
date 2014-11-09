@@ -1,0 +1,265 @@
+C51 COMPILER V8.05a   LED                                                                  04/16/2009 20:53:45 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE LED
+OBJECT MODULE PLACED IN .\obj\led.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\led.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\led.lst) OBJEC
+                    -T(.\obj\led.obj)
+
+line level    source
+
+   1          
+   2           /////////////////////////////////////////////////////////////////////////////
+   3           // +---------------------------------------------------------------------+ //
+   4           // |                              LED driver                             | //
+   5           // |                     ------------------------------                  | //
+   6           // |                            Verze 1.01Tiny                           | //
+   7           // |                                                                     | //
+   8           // |                            Thomas Hoodger                           | //
+   9           // |                        Copyright (c) 2005-2008                      | //
+  10           // |                     thomas.hoodger(at)gmail.com                     | //
+  11           // +---------------------------------------------------------------------+ //
+  12           // |                                                                     | //
+  13           // |  Ridi svit signalizacnich LED, automaticky zhasina jednotlive LED   | //
+  14           // |  po nastavene dobe svitu                                            | //
+  15           // |                                                                     | //
+  16           // +---------------------------------------------------------------------+ //
+  17           //    Version history:                                                     //
+  18           //       1.01         Zakladni verze                                       //
+  19           //                                                                         //
+  20           // ----------------------------------------------------------------------- //
+  21           /////////////////////////////////////////////////////////////////////////////
+  22          
+  23          #include "target.def"
+  24          #include TARGET_SFR_HEADER
+  25          #include "timers.h"
+  26          #include "led.h"
+  27          
+  28          //#define LED_COUNT          6
+  29          #define LED_LIGHT_TIME    10
+  30          
+  31          
+  32          uchar xdata LED_COUNTER[LED_COUNT];
+  33          
+  34          
+  35          
+  36          // +-----------------------------------------+
+  37          // | Zhasnuti LED                            |
+  38          // +-----------------------------------------+
+  39          void led_off(uchar led_id)
+  40          {
+  41   1          LED_PORT |= (1 << led_id);
+  42   1      }
+  43          
+  44          
+  45          // +-----------------------------------------+
+  46          // | Rosviceni LED                           |
+  47          // +-----------------------------------------+
+  48          void led_on(uchar led_id)
+  49          {
+  50   1          LED_PORT &= ~(1 << led_id);
+  51   1      }
+  52          
+  53          
+  54          // +-----------------------------------------+
+C51 COMPILER V8.05a   LED                                                                  04/16/2009 20:53:45 PAGE 2   
+
+  55          // | Rosviceni LED na urcity casovy interval |
+  56          // +-----------------------------------------+
+  57          void led_blink(uchar led_id)
+  58          {
+  59   1          LED_COUNTER[led_id] = LED_LIGHT_TIME;           // nastav cas pro svit LED
+  60   1          led_on(led_id);                                 // rozhni
+  61   1      }
+  62          
+  63          
+  64          // +-----------------------------------------+
+  65          // | Proces automatickeho zhasinani LED      |
+  66          // +-----------------------------------------+
+  67          void led_proc()
+  68          {
+  69   1          uchar i;
+  70   1      
+  71   1          if(!TIMER_LED)
+  72   1          {
+  73   2              TIMER_LED = TIME_10MS;
+  74   2          
+  75   2              for(i=0; i<LED_COUNT; i++)
+  76   2              {
+  77   3                  if(LED_COUNTER[i]) 
+  78   3                      LED_COUNTER[i]--;
+  79   3                  else
+  80   3                      led_off(i);                                 // zhasni LED
+  81   3              }
+  82   2          }
+  83   1      }
+  84          
+  85          
+  86          // +-----------------------------------------+
+  87          // | Inicializace driveru                    |
+  88          // +-----------------------------------------+
+  89          void led_init()
+  90          {
+  91   1          uchar i;
+  92   1      
+  93   1          TIMER_LED = TIME_1SEC;
+  94   1      
+  95   1          for(i=0; i<LED_COUNT; i++)
+  96   1              led_blink(i);
+  97   1      }
+  98          
+  99          
+C51 COMPILER V8.05a   LED                                                                  04/16/2009 20:53:45 PAGE 3   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION _led_off (BEGIN)
+                                           ; SOURCE LINE # 39
+;---- Variable 'led_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 40
+                                           ; SOURCE LINE # 41
+0000 7401              MOV     A,#01H
+0002 A807              MOV     R0,AR7
+0004 08                INC     R0
+0005 8002              SJMP    ?C0016
+0007         ?C0015:
+0007 C3                CLR     C
+0008 33                RLC     A
+0009         ?C0016:
+0009 D8FC              DJNZ    R0,?C0015
+000B 4280              ORL     P0,A
+                                           ; SOURCE LINE # 42
+000D 22                RET     
+             ; FUNCTION _led_off (END)
+
+             ; FUNCTION _led_on (BEGIN)
+                                           ; SOURCE LINE # 48
+;---- Variable 'led_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 49
+                                           ; SOURCE LINE # 50
+0000 7401              MOV     A,#01H
+0002 A807              MOV     R0,AR7
+0004 08                INC     R0
+0005 8002              SJMP    ?C0018
+0007         ?C0017:
+0007 C3                CLR     C
+0008 33                RLC     A
+0009         ?C0018:
+0009 D8FC              DJNZ    R0,?C0017
+000B F4                CPL     A
+000C 5280              ANL     P0,A
+                                           ; SOURCE LINE # 51
+000E 22                RET     
+             ; FUNCTION _led_on (END)
+
+             ; FUNCTION _led_blink (BEGIN)
+                                           ; SOURCE LINE # 57
+;---- Variable 'led_id' assigned to Register 'R7' ----
+                                           ; SOURCE LINE # 58
+                                           ; SOURCE LINE # 59
+0000 7400        R     MOV     A,#LOW LED_COUNTER
+0002 2F                ADD     A,R7
+0003 F582              MOV     DPL,A
+0005 E4                CLR     A
+0006 3400        R     ADDC    A,#HIGH LED_COUNTER
+0008 F583              MOV     DPH,A
+000A 740A              MOV     A,#0AH
+000C F0                MOVX    @DPTR,A
+                                           ; SOURCE LINE # 60
+000D 020000      R     LJMP    _led_on
+             ; FUNCTION _led_blink (END)
+
+             ; FUNCTION led_proc (BEGIN)
+                                           ; SOURCE LINE # 67
+                                           ; SOURCE LINE # 68
+C51 COMPILER V8.05a   LED                                                                  04/16/2009 20:53:45 PAGE 4   
+
+                                           ; SOURCE LINE # 71
+0000 E500        E     MOV     A,timers+03H
+0002 4500        E     ORL     A,timers+02H
+0004 702B              JNZ     ?C0010
+                                           ; SOURCE LINE # 72
+                                           ; SOURCE LINE # 73
+0006 F500        E     MOV     timers+02H,A
+0008 750001      E     MOV     timers+03H,#01H
+                                           ; SOURCE LINE # 75
+;---- Variable 'i' assigned to Register 'R6' ----
+000B FE                MOV     R6,A
+000C         ?C0005:
+                                           ; SOURCE LINE # 76
+                                           ; SOURCE LINE # 77
+000C 7400        R     MOV     A,#LOW LED_COUNTER
+000E 2E                ADD     A,R6
+000F F582              MOV     DPL,A
+0011 E4                CLR     A
+0012 3400        R     ADDC    A,#HIGH LED_COUNTER
+0014 F583              MOV     DPH,A
+0016 E0                MOVX    A,@DPTR
+0017 600F              JZ      ?C0008
+                                           ; SOURCE LINE # 78
+0019 7400        R     MOV     A,#LOW LED_COUNTER
+001B 2E                ADD     A,R6
+001C F582              MOV     DPL,A
+001E E4                CLR     A
+001F 3400        R     ADDC    A,#HIGH LED_COUNTER
+0021 F583              MOV     DPH,A
+0023 E0                MOVX    A,@DPTR
+0024 14                DEC     A
+0025 F0                MOVX    @DPTR,A
+0026 8005              SJMP    ?C0007
+0028         ?C0008:
+                                           ; SOURCE LINE # 80
+0028 AF06              MOV     R7,AR6
+002A 120000      R     LCALL   _led_off
+                                           ; SOURCE LINE # 81
+002D         ?C0007:
+002D 0E                INC     R6
+002E BE03DB            CJNE    R6,#03H,?C0005
+                                           ; SOURCE LINE # 82
+                                           ; SOURCE LINE # 83
+0031         ?C0010:
+0031 22                RET     
+             ; FUNCTION led_proc (END)
+
+             ; FUNCTION led_init (BEGIN)
+                                           ; SOURCE LINE # 89
+                                           ; SOURCE LINE # 90
+                                           ; SOURCE LINE # 93
+0000 750000      E     MOV     timers+02H,#00H
+0003 750064      E     MOV     timers+03H,#064H
+                                           ; SOURCE LINE # 95
+;---- Variable 'i' assigned to Register 'R6' ----
+0006 E4                CLR     A
+0007 FE                MOV     R6,A
+0008         ?C0011:
+                                           ; SOURCE LINE # 96
+0008 AF06              MOV     R7,AR6
+000A 120000      R     LCALL   _led_blink
+000D 0E                INC     R6
+C51 COMPILER V8.05a   LED                                                                  04/16/2009 20:53:45 PAGE 5   
+
+000E BE03F7            CJNE    R6,#03H,?C0011
+                                           ; SOURCE LINE # 97
+0011         ?C0014:
+0011 22                RET     
+             ; FUNCTION led_init (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    113    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =      3    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

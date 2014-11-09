@@ -1,0 +1,7 @@
+COM(1, 7200)
+DEVICE(89LPC922, 7.373000)
+HARDWARE(ASSERT)
+HIGHSPEED(0, 7200)
+TIMEOUTS(4, 60)
+ERASEUSED(H:\PrgJaz\_Prac\Light_sensor\Light_sensor_1.05\obj\light_sensor.hex, PROTECTISP)
+HEXFILE(H:\PrgJaz\_Prac\Light_sensor\Light_sensor_1.05\obj\light_sensor.hex, NOCHECKSUMS, NOFILL, PROTECTISP)

@@ -1,0 +1,16 @@
+
+            P89LPC922FN                 DIP20
+
+                                  +------+-+------+
+            P0.0 / CMP2 / KBI0    |   1  |_|  20  |  P0.1 / CIN2B / KBI1
+            P1.7                  |   2       19  |  P0.2 / CIN2A / KBI2
+            P1.6                  |   3       18  |  P0.3 / CIN1B / KBI3
+            P1.5 / RST            |   4       17  |  P0.4 / CIN1A / KBI4
+            GND                   |   5       16  |  P0.5 / CMPREF / KBI5
+            P3.1 / XTAL           |   6       15  |  Ucc
+            P3.0 / CLKOUT / XTAL  |   7       14  |  P0.6 / CMP1 / KBI6
+            P1.4 / INT1           |   8       13  |  P0.7 / T1 / KBI7
+            P1.3 / SDA / INT0     |   9       12  |  P1.0 / TXD
+            P1.2 / SCL / T0       |  10       11  |  P1.1 / RXD
+                                  +---------------+
+

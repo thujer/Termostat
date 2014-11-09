@@ -1,0 +1,232 @@
+
+    /////////////////////////////////////////////////////////////////////////////
+    // +---------------------------------------------------------------------+ //
+    // |                          UART - Serial Driver                       | //
+    // |                     ------------------------------                  | //
+    // |                       Verze 2.36Tiny Build 081229                   | //
+    // |                                                                     | //
+    // |                         Copyright Tomas Hujer                       | //
+    // |                             (c) 2005-2008                           | //
+    // |                      thomas.hoodger(at)gmail.com                    | //
+    // |                                                                     | //
+    // +---------------------------------------------------------------------+ //
+    //  Driver for buffered, interrupt communication via RS232                 //
+    //  Here is 2 buffers - for receive and for send data. Index of each       //
+    //  buffer is rotating type. Each buffer have two indexs - first for       //
+    //  write to buffer, second for read from buffer.                          //
+    //                                                                         //
+    //  Interrupt routine write receive data to uart_recbuf                    //
+    //  Sending process is directing by routine UART_PROC(). This routine is   //
+    //  called from main loop each or few cycle. Routine wait for count-down   //
+    //  variable UART_SDELAY, then read byte from UART_SNDBUF and write him    //
+    //  to SBUF.                                                               //
+    //                                                                         //
+    // ----------------------------------------------------------------------- //
+    //                                                                         //
+    //  Version history from 2.25:                                             //
+    //                                                                         //
+    //        -------------------------------------------------------------    //
+    //        2.27   - Pridan status uart_rb_overflow - signalizuje            //
+    //                 preteceni prijimaciho bufferu, resetuje se              //
+    //                 v hlavni smycce.                                        //
+    //        -------------------------------------------------------------    //
+    //        2.28   - UART_id.k prejmenovano na UART_drv.def                  //
+    //                 definice velikosti bufferu presunty do UART_drv.def     //
+    //        -------------------------------------------------------------    //
+    //        2.29   - Upraveno pro minimalni hw naroky                        //
+    //        -------------------------------------------------------------    //
+    //        2.30   - Osetren stav nahodneho prepsani indexu pro              //
+    //                 zapis a cteni. Indexy jsou pri kazdem dokonceni         //
+    //                 prijmu nebo vysilani resetovany.                        //
+    //        -------------------------------------------------------------    //
+    //        2.33   - Opraveno cyklicke volani preruseni po odeslani          //
+    //                 znaku, osetreno nastavenim flagu v preruseni,           //
+    //                 pridan timeout pro dokonceni odeslani znaku             //
+    //        -------------------------------------------------------------    //
+    //        2.34   - Opraven algoritmus ukladani a vycitani prijatych znaku  //
+    //                 z bufferu, nahodne zpusoboval kolaps - chybne vycteni   //
+    //                 znaku z bufferu pri prijmu vice znaku (cca 60ti)        //
+    //        -------------------------------------------------------------    //
+    //        2.35   - Upraveno pro variantu LPC922                            //
+    //        -------------------------------------------------------------    //
+    //        2.36   - Upravena inicializace parametru komunikace pro LPC922   //
+    //               - Pridana detekce break, framing error a overrun          //
+    //               - Provedeno Boot recovery pri detekci signalu BREAK       //
+    //        -------------------------------------------------------------    //
+    //                                                                         //
+    // ----------------------------------------------------------------------- //
+    /////////////////////////////////////////////////////////////////////////////
+
+#pragma LIST
+#pragma PAGELENGTH(30000);
+#pragma LINES
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+
+#include "led.def"
+#include "led.h"
+#include "timers.h"
+#include "uart.def"
+#include "uart.h"
+#include "uart.mcu"
+
+#define uchar unsigned char
+#define uint  unsigned int
+#define ulong unsigned long
+
+/*-------------------------------------------------------------------------*/
+uchar  TARGET_XMEM  uart_recbuf[UART_RECBUFSIZE];
+uchar  TARGET_MMEM  uart_rw_ix;
+uchar  TARGET_MMEM  uart_rr_ix;
+char   TARGET_MMEM  uart_rbyte;
+
+/*-------------------------------------------------------------------------*/
+// Flagy komunikace
+bit                 uart_ribuf;                        // flag prichoziho znaku v bufferu
+bit                 uart_transfer_finished;            // flag dokonceni odesilani znaku
+bit                 uart_rb_overflow;                  // flag preteceni prijimaciho bufferu
+
+/*-------------------------------------------------------------------------*/
+// Chyby na komunikaci
+#if TARGET_MCU == LPC922
+bit                 uart_detected_break;               // flag detekce prichoziho break
+bit                 uart_detected_framing_error;       // flag detekce chybneho ramce
+bit                 uart_detected_overrun;             // flag detekce prepsani znaku
+#endif
+
+/*-------------------------------------------------------------------------*/
+#define             UART_TRANSFER_TIME    TIME_1SEC;
+
+
+
+// +--------------------------------------------------------------+ //
+// |                       Init serial UART                       | //
+// +--------------------------------------------------------------+ //
+// | cpu_xtal    ... xtal rezonator frequency [Hz] (18432000)     | //
+// | tact        ... cpu ticks per instruction (6)                | //
+// | uart_speed  ... communication speed [baud] (19200)           | //
+// +--------------------------------------------------------------+ //
+void uart_init(ulong cpu_xtal, uchar tact, ulong uart_speed)
+{
+    uchar i;
+    uchar timer_value;
+
+    // vypocti hodnotu timeru
+    timer_value = (cpu_xtal / tact) / uart_speed;
+
+    // vymaz buffer
+    for(i=0; i<sizeof(uart_recbuf); i++)
+    {
+        uart_recbuf[i]=0;
+    }
+
+    uart_ribuf = 0;
+    uart_rw_ix = 0;
+    uart_rr_ix = 0;
+    uart_rbyte = 0;
+    uart_rb_overflow = 0;
+    uart_transfer_finished = 1;       // povol odeslani znaku
+
+    #if TARGET_MCU == LPC922
+    uart_detected_break = 0;
+    uart_detected_framing_error = 0;
+    uart_detected_overrun = 0;
+    #endif
+
+    uart_mcu_init(timer_value);
+}
+
+
+
+// +-----------------------------------------------------------------------+
+// |            Interrupt - Zapis prichoziho znaku do recbuf               |
+// +-----------------------------------------------------------------------+
+//
+//       ----------V-------------------------------- WR
+//       ----------V-------------------------------- RD
+//
+#pragma NOAREGS
+void uart_interrupt() interrupt 4 using 1
+{
+    if(RI)                                        // Pokud prijaty znak
+    {
+        RI = 0;                                   // Reset priznaku
+
+        uart_rw_ix %= UART_RECBUFSIZE;            // rotuj index
+        
+        uart_recbuf[uart_rw_ix] = SBUF;           // zapis znak do bufferu
+        uart_rw_ix++;                             // posun index
+
+        if(uart_rw_ix == uart_rr_ix)              // pokud se indexy rovnaji, 
+            uart_rb_overflow = 1;                 // nastav flag preteceni bufferu
+    }
+
+    if(TI)
+    {
+        TI = 0;
+        uart_transfer_finished = 1;
+    }
+
+    #if TARGET_MCU == LPC922
+    if(uart_mcu_detect_break())                   // pokud detekovan signal break
+        uart_detected_break = 1;                  // nastav flag
+
+    if(uart_mcu_detect_framing_error())           // pokud detekovana chyba ramce
+        uart_detected_framing_error = 1;          // nastav flag
+
+    if(uart_mcu_detect_overrun())                 // pokud znak prepsan
+        uart_detected_overrun = 1;                // nastav flag
+    #endif
+}
+#pragma AREGS
+
+
+// +-------------------------------------------------+
+// |   Waiting for transfer complete or timeout      |
+// +-------------------------------------------------+
+void uart_wait_for_transfer()
+{
+    TIMER_UART = UART_TRANSFER_TIME;
+
+    // cekej dokud neni dokonceno odesilani znaku nebo vyprsel timeout    
+    while((~uart_transfer_finished) && TIMER_UART);
+
+    uart_transfer_finished = 0;
+}
+
+
+// +-------------------------------------------------+
+// |             UART device output routine          |
+// +-------------------------------------------------+
+char uart_putchar(char c)
+{
+    uart_wait_for_transfer();
+    SBUF = c;
+
+    led_blink(LED_ID_HWCOM_SND);                // Rozvit signalizacni LED
+
+    return(c);
+}
+
+
+
+// +-------------------------------------------------+
+// |           Vyzvednuti znaku z recbuf             |
+// +-------------------------------------------------+
+void uart_proc()
+{
+    if(uart_rr_ix != uart_rw_ix)                // pokud je v bufferu znak
+    {
+        //ES = 0;                                 // zakaz preruseni
+        uart_rr_ix %= UART_RECBUFSIZE;          // rotuj index
+        uart_rbyte = uart_recbuf[uart_rr_ix];
+        uart_rr_ix++;                           // Posun index
+        uart_ribuf=1;                           // Nastav flag znaku v RBUF
+        led_blink(LED_ID_HWCOM_REC);            // Rozvit signalizacni LED
+        //ES = 1;
+    }
+    else
+        uart_ribuf=0;                           // Nastav flag znaku v RBUF
+}
+

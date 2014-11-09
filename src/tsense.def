@@ -1,0 +1,31 @@
+
+#ifndef __TSENSE_DEF__
+    #define __TSENSE_DEF__
+
+    #define TSENSE_DEBUG_LOG                1
+    #define TSENSE_COMPILE_COMPENSATION     1
+
+    #define TSENSE_SENSOR_INPUT             INT0
+    
+    #define TSENSE_ARRAY_SIZE               8
+    #define TSENSE_TASK_BUFFER_SIZE         8
+
+    #define TSENSE_PERIODS_SKIPPED          2
+    #define TSENSE_PERIOD_COUNT             25
+
+    #define TSENSE_CONNECT_TIME             TIME_10SEC
+
+    typedef enum { TSENSE_TIMER_COUNT_REGARDLESS_INT0 = 0,
+                   TSENSE_TIMER_COUNT_IF_INT0_HIGH
+    };
+    
+    typedef enum {  TSENSE_SENSOR_LIVE_ERROR  = 0,
+                    TSENSE_SENSOR_LIVE_OK
+    };
+
+    typedef enum {  TSENSE_SIGNAL_LEVEL_LOW   = 0,
+    	            TSENSE_SIGNAL_LEVEL_HIGH
+    };
+
+
+#endif

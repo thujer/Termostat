@@ -1,0 +1,164 @@
+
+    /////////////////////////////////////////////////////////////////////////////
+    // +---------------------------------------------------------------------+ //
+    // |                             PINs driver                             | //
+    // |                     ------------------------------                  | //
+    // |                            Verze 1.03Tiny                           | //
+    // |                                                                     | //
+    // |                     Tomas Hujer (c) 2005-2008                       | //
+    // |                    thomas.hoodger(at)gmail.com                      | //
+    // +---------------------------------------------------------------------+ //
+    // |                                                                     | //
+    // |  Konfigurace, nastaveni a testovani jednotlivych pinu MCU           | //
+    // |                                                                     | //
+    // +---------------------------------------------------------------------+ //
+    //    Version history:                                                     //
+    //                   ----------------------------------------------        //
+    //       1.01         Zakladni verze                                       //
+    //                   ----------------------------------------------        //
+    //       1.02         Upraveny popisky k jednotlivym funkcim               //
+    //                   ----------------------------------------------        //
+    //       1.03 090109  Zjednodusena rutina pin_get_state                    //
+    //                   ----------------------------------------------        //
+    //                                                                         //
+    // ----------------------------------------------------------------------- //
+    /////////////////////////////////////////////////////////////////////////////
+#pragma LIST
+#pragma PAGELENGTH(30000);
+#pragma LINES
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+
+#define uchar unsigned char
+#define uint  unsigned int 
+
+#include "pin.h"
+#include "stdio.h"
+
+
+// +---------------------------------------------------------------------+ //
+// |  Zmena stavu pinu MCU                                               | //
+// +---------------------------------------------------------------------+ //
+// | char port_id ... ID portu na kterem se bude stav pinu menit (0..1)  | //
+// | char pin_id  ... cislo pinu prislusneho portu (0..7)                | //
+// | char state   ... nova hodnota pinu (0..1)                           | //
+// +---------------------------------------------------------------------+ //
+// | Vraci: void                                                         | //
+// +---------------------------------------------------------------------+ //
+void pin_change(uchar port_id, uchar pin_id, uchar state)
+{
+    uchar pin_mask;
+    uchar pin_state;
+
+    pin_mask  = (1 << pin_id);
+    pin_state = (state << pin_id);
+
+    switch(port_id)
+    {
+        case PORT_ID_P0:  P0 = ((P0 & (~pin_mask)) | pin_state);     break;
+        case PORT_ID_P1:  P1 = ((P1 & (~pin_mask)) | pin_state);     break;
+
+        #if (TARGET_MCU==C51RD2) || (TARGET_MCU==C51ED2)
+        case PORT_ID_P2:  P2 = ((P2 & (~pin_mask)) | pin_state);     break;
+        case PORT_ID_P3:  P3 = ((P3 & (~pin_mask)) | pin_state);     break;
+        #endif
+    }
+}
+
+
+// +---------------------------------------------------------------------+ //
+// |  Zjisteni stavu pinu MCU                                            | //
+// +---------------------------------------------------------------------+ //
+// | Parametry:                                                          | //
+// |  char port_id ... ID portu na kterem se bude stav pinu menit (0..1) | //
+// |  char pin_id  ... cislo pinu prislusneho portu (0..7)               | //
+// +---------------------------------------------------------------------+ //
+// | Vraci:                                                              | //
+// |  unsigned char state ... hodnota pinu (0..1)                        | //
+// +---------------------------------------------------------------------+ //
+bit pin_get_state(uchar port_id, uchar pin_id)
+{
+    bit   out_value;
+    uchar port_mask;
+    uchar port_value;
+
+    out_value = port_value = 0;
+    port_mask = (1 << pin_id);
+
+    switch(port_id)
+    {
+        case PORT_ID_P0:  port_value = (P0 & port_mask);  break;
+        case PORT_ID_P1:  port_value = (P1 & port_mask);  break;
+
+        #if (TARGET_MCU==C51RD2) || (TARGET_MCU==C51ED2)
+        case PORT_ID_P2:  port_value = (P2 & port_mask);  break;
+        case PORT_ID_P3:  port_value = (P3 & port_mask);  break;
+        #endif
+    }
+
+    out_value = (port_value?1:0);
+
+    return(out_value);
+}
+
+
+// +---------------------------------------------------------------------+ //
+// |  Konfigurace pinu MCU                                               | //
+// +---------------------------------------------------------------------+ //
+// | Parametry:                                                          | //
+// |  char port_id ... ID portu na kterem se bude stav pinu menit (0..1) | //
+// |  char pin_id  ... cislo pinu prislusneho portu (0..7)               | //
+// |  char state   ... ID typu pinu:                                     | //
+// |                       PIN_TYPE_QUASI_BIDIRECTIONAL                  | //
+// |                       PIN_TYPE_PUSH_PULL                            | //
+// |                       PIN_TYPE_INPUT_ONLY                           | //
+// |                       PIN_TYPE_OPEN_DRAIN                           | //
+// |                                                                     | //
+// +---------------------------------------------------------------------+ //
+// | Vraci: void                                                         | //
+// +---------------------------------------------------------------------+ //
+#if  TARGET_MCU==LPC922
+void pin_set(uchar port_id, uchar pin_id, uchar pin_type)
+{
+    uchar pin_mask;
+
+    pin_mask = (1 << pin_id);
+
+    switch(pin_type)
+    {
+        case PIN_TYPE_QUASI_BIDIRECTIONAL:
+                switch(port_id)
+                {
+                    case 0: P0M1 &= ~pin_mask;    P0M2 &= ~pin_mask;   break;
+                    case 1: P1M1 &= ~pin_mask;    P1M2 &= ~pin_mask;   break;
+                }
+                break;
+
+        case PIN_TYPE_PUSH_PULL:
+                switch(port_id)
+                {
+                    case 0: P0M1 &= ~pin_mask;   P0M2 &= ~pin_mask;   break;
+                    case 1: P1M1 |= pin_mask;    P1M2 |= pin_mask;    break;
+                }
+                break;
+
+        case PIN_TYPE_INPUT_ONLY:
+                switch(port_id)
+                {
+                    case 0: P0M1 |= pin_mask;    P0M2 |= pin_mask;    break;
+                    case 1: P1M1 &= ~pin_mask;   P1M2 &= ~pin_mask;   break;
+                }
+                break;
+
+        case PIN_TYPE_OPEN_DRAIN:
+                switch(port_id)
+                {
+                    case 0: P0M1 |= pin_mask;    P0M2 |= pin_mask;   break;
+                    case 1: P1M1 |= pin_mask;    P1M2 |= pin_mask;   break;
+                }
+                break;
+    }
+}
+#endif
+

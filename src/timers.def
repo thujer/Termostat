@@ -1,0 +1,75 @@
+
+#ifndef __TIMERS_DEF__
+    #define __TIMERS_DEF__
+
+    // ----------------------------------------------------------------------------------
+    #define  NO_INCLUDE_SYSTIME       0
+	#define  INCLUDE_SYSTIME          1   
+
+    // Kompilovat se systemovym casem
+    #define SYSTEM_TIME_INCLUDE        NO_INCLUDE_SYSTIME
+    // ----------------------------------------------------------------------------------
+
+    // Pocet tiku casovace do za 1 sekundu, pri nepresnosti upravit
+    #define TIME_TICK_TO_1SEC          100
+
+    // definice ID timeoutu
+    typedef enum
+    {
+        TIMER_ID_UART,                      // 1: UART:     Timeout pro odesilani znaku
+        TIMER_ID_LED,                       // 7: LED:      blink timeout
+        TIMER_ID_TSENSE,                    // 8: TSENSE:   teplotni cidlo
+        TIMER_ID_MEASURE,                   // 9: MEASURE:  mereni
+
+        TIMERS_COUNT                        // Pocet casovacu celkem
+    };
+
+
+    // Prirazeni ID timeoutu indexum v poli timeoutu
+    #define TIMER_UART               timers[ TIMER_ID_UART            ] // UART:     Timeout pro odesilani znaku
+    #define TIMER_LED                timers[ TIMER_ID_LED             ] // LED:      Rizeni doby svitu signalizacnich LED
+    #define TIMER_TSENSE             timers[ TIMER_ID_TSENSE          ] // TSENSE:   Teplotni cidlo
+    #define TIMER_MEASURE            timers[ TIMER_ID_MEASURE         ] // MAIN:     Zahajeni mereni
+
+
+    // Definice casovych useku
+    #define TIME_10MS                     1
+    #define TIME_20MS                     2
+    #define TIME_30MS                     3
+    #define TIME_50MS                     5
+    #define TIME_100MS                   10
+    #define TIME_120MS                   12
+    #define TIME_150MS                   15
+    #define TIME_170MS                   17
+    #define TIME_200MS                   20
+    #define TIME_300MS                   30
+    #define TIME_500MS                   50
+    #define TIME_1SEC                   100
+    #define TIME_1500MS                 150
+    #define TIME_2SEC                   200
+    #define TIME_3SEC                   300
+    #define TIME_4SEC                   400
+    #define TIME_5SEC                   500
+    #define TIME_6SEC                   600
+    #define TIME_7SEC                   700
+    #define TIME_8SEC                   800
+    #define TIME_9SEC                   900
+    #define TIME_10SEC                 1000
+    #define TIME_15SEC                 1500
+    #define TIME_20SEC                 2000
+    #define TIME_25SEC                 2500
+    #define TIME_30SEC                 3000
+    #define TIME_50SEC                 5000
+    #define TIME_60SEC                 6000
+    #define TIME_80SEC                 8000
+    #define TIME_100SEC               10000
+    #define TIME_120SEC               12000
+    #define TIME_140SEC               14000
+    #define TIME_150SEC               15000
+    #define TIME_5MIN                 30000
+    #define TIME_10MIN                60000
+    #define TIME_11MIN                65535
+
+
+#endif
+

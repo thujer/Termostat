@@ -1,0 +1,34 @@
+
+
+--------------------------------------------------------------------------------------------------------
+ - pridat watchdog
+   po urcite dobe dochazi k zaseknuti, avsak UART echuje, nereaguje na prikazy
+   otestovat s blikajici LED
+   - prozatim v 1 pripade bylo zaseknuti zpusobeno prepnutim v ISP modu
+   zkusit filtrovat recovery pin
+
+ - watchdog pridan
+--------------------------------------------------------------------------------------------------------
+ - pridat sensor svetla, pokud je v okoli svetlo, nerozsvecet
+   je mozne pripojit na externi preruseni a pri nabezne hrane cpu probudit
+
+--------------------------------------------------------------------------------------------------------
+ - zkontrolovat spravny zapis BOOT VECTORu a STATU BYTE, zda neni mozne ze by se musely nejprve smazat.
+   pri aktivaci ISP modu se musi dodrzet nasledujici postup:
+
+        1. prikaz BOOT<CR>
+        2. stisknout programovat - smaze obsah procesoru ve velikosti HEX a skonci chybou komunikace
+        3. restartovat CPU - nabehne ISP mod
+        4. stisknout programovat - smazani a naprogramovani probehne uspesne
+        5. restart - spusti se novy kod
+
+ - opraveno - chyba v autorizace IAP, po nastaveni promennych nebyla zavolana API funkce IAP,
+              proto se autorizace nevykonala a prikaz se provedl zrejme az pri autorizaci po ISP
+
+        1. prikaz BOOT<CR>
+        2. stisknout programovat - smazani a naprogramovani - probehne uspesne
+        3. restart - spusti se novy kod
+--------------------------------------------------------------------------------------------------------
+
+
+

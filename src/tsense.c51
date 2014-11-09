@@ -1,0 +1,480 @@
+
+    /////////////////////////////////////////////////////////////////////////////
+    // +---------------------------------------------------------------------+ //
+    // |                            Temperature Sensor                       | //
+    // |                       ----------------------------                  | //
+    // |                              Version 1.00a                          | //
+    // |                                                                     | //
+    // |                         Copyright Thomas Hoodger                    | //
+    // |                             (c) 2005-2008                           | //
+    // |                      thomas.hoodger(at)gmail.com                    | //
+    // |                                                                     | //
+    // +---------------------------------------------------------------------+ //
+    // |  Calculating temperature from external detector                     | //
+    // +---------------------------------------------------------------------+ //
+    //                                                                         //
+    //  ---------------------------------------------------------------------  //
+    //    Version history:                                                     //
+    //                                                                         //
+    //       1.01         Zakladni verze s jednorozmernym bufferem udalosti    //
+    //                                                                         //
+    //                                                                         //
+    //  ---------------------------------------------------------------------  //
+    //                                                                         //
+    // ----------------------------------------------------------------------- //
+    /////////////////////////////////////////////////////////////////////////////
+
+#pragma LIST
+#pragma PAGELENGTH(30000);
+#pragma LINES
+
+#define uchar  unsigned char
+#define uint   unsigned int
+#define ulong  unsigned long
+
+#include "target.def"
+#include TARGET_SFR_HEADER
+#include "target.h"
+#include "event.h"
+#include "event.def"
+#include "led.h"
+#include "led.def"
+#include "my_types.h"
+#include "timers.h"
+#include "tsense.def"
+#include "tsense.mcu"
+
+// ------------------------------------------------------------------------------------------
+// Task buffer structure
+typedef struct {
+    uchar  sensor_id;
+    uchar  event_id;
+} t_tsense_task;
+
+// ------------------------------------------------------------------------------------------
+// TSense driver task scheduler variables
+uchar          TARGET_MMEM  tsense_task_ix_wr;                         // Index for task write
+uchar          TARGET_MMEM  tsense_task_ix_rd;                         // Index for task read
+uchar          TARGET_MMEM  tsense_task_in_buf;                        // Current number of pieces in buffer
+t_tsense_task  TARGET_XMEM  tsense_task_buf[TSENSE_TASK_BUFFER_SIZE];  // Tasks buffer
+bit                         tsense_task_missed_flag;                   // Flag of buffer overload
+bit                         tsense_task_buf_empty_flag;                // Flag to generate buffer emptied event
+
+// ------------------------------------------------------------------------------------------
+// Current working task
+uchar         TARGET_SMEM   tsense_sensor_id;                          // Current sensor
+uchar         TARGET_SMEM   tsense_event_id;                           // Measure finish generated event
+
+// ------------------------------------------------------------------------------------------
+// Measuring variables
+bit                         tsense_measure_signal_level_flag;          // Measuring signal level 
+bit                         tsense_value_pickup_request;               // Measure pickup request
+
+uchar          TARGET_SMEM  tsense_measure_skip_periods;               // Skip periods
+uchar          TARGET_SMEM  tsense_measure_period_count;               // Measured periods count
+
+t_double_byte  TARGET_SMEM  tsense_timer_value;
+uint           TARGET_SMEM  tsense_timer_value_H;                      // Measure value high level
+uint           TARGET_SMEM  tsense_timer_value_L;                      // Measure value low level
+
+float          TARGET_SMEM  tsense_temperature;                        // Calculated temperature
+uchar          TARGET_SMEM  tsense_interrupt_counter;                  // interrupt call counter
+// ------------------------------------------------------------------------------------------
+#if TSENSE_COMPILE_COMPENSATION
+// Measuring compensation
+uint           TARGET_MMEM  tsense_timer_H_value_min[TSENSE_PERIODS_SKIPPED]; // Measure value high level
+uint           TARGET_MMEM  tsense_timer_H_value_max[TSENSE_PERIODS_SKIPPED]; // Measure value low level
+uint           TARGET_MMEM  tsense_timer_L_value_min[TSENSE_PERIODS_SKIPPED]; // Measure value high level
+uint           TARGET_MMEM  tsense_timer_L_value_max[TSENSE_PERIODS_SKIPPED]; // Measure value low level
+#endif
+// ------------------------------------------------------------------------------------------
+#ifdef TSENSE_DEBUG_LOG
+uint           TARGET_MMEM  tsense_timer_H_array[TSENSE_PERIOD_COUNT]; // array of time values
+uchar          TARGET_SMEM  tsense_timer_H_array_ix;
+
+uint           TARGET_MMEM  tsense_timer_L_array[TSENSE_PERIOD_COUNT]; // array of time values
+uchar          TARGET_SMEM  tsense_timer_L_array_ix;
+#endif
+// ------------------------------------------------------------------------------------------
+
+
+
+// +---------------------------------------------+
+// |  Add TSENSE task into driver-self buffer    |
+// +---------------------------------------------+
+// |  Returns                                    |
+// |     1 ... ok, task saved in buffer          |
+// |     0 ... error, task buffer full           |
+// +---------------------------------------------+
+bit tsense_add_task(uchar sensor_id, uchar event_id)
+{
+    if(tsense_task_in_buf < TSENSE_TASK_BUFFER_SIZE)                     // if its space in buffer
+    {
+        tsense_task_ix_wr %= TSENSE_TASK_BUFFER_SIZE;                    // rotate index for write
+        tsense_task_buf[tsense_task_ix_wr].sensor_id = sensor_id;        // save sensor into task buffer
+        tsense_task_buf[tsense_task_ix_wr].event_id  = event_id;         // save event into task buffer
+        tsense_task_ix_wr++;                                             // move index for write
+        tsense_task_in_buf++;                                            // increase num of pieces in buffer
+        return(1);
+    }
+    else
+        return(0);
+}
+
+
+// +---------------------------------------------+
+// | Temperature sensor live test                |
+// +---------------------------------------------+
+bit tsense_sensor_live_test_ok()
+{
+    TIMER_TSENSE = TSENSE_CONNECT_TIME;
+
+    // wait for H on SENSOR_INPUT
+    while(TSENSE_SENSOR_INPUT)
+        if(!TIMER_TSENSE)
+            return(TSENSE_SENSOR_LIVE_ERROR);
+
+    // wait for zero on SENSOR_INPUT
+    while(TIMER_TSENSE)
+        if(~TSENSE_SENSOR_INPUT)
+            return(TSENSE_SENSOR_LIVE_OK);
+
+    return(TSENSE_SENSOR_LIVE_ERROR);
+}
+
+
+// +---------------------------------------------+
+// | Start measuring of wanted temperature       |
+// +---------------------------------------------+
+bit tsense_get_temperature(uchar sensor_id, uchar event_id)
+{
+    uchar i;
+
+    // Nastaveni promennych pro spusteni mereni
+    // nastaveni navratove udalosti
+    // nastaveni multiplexeru na pozadovane cidlo
+
+    // Set on 3 low bits of P0 multiplexer address - sensor address
+    //P0 = (ts_sense_id & (1+2+4)) | (P0 & (0xFF-(1+2+4)));
+
+    // Start measuring
+    // ------------------------------------
+    tsense_sensor_id = sensor_id;
+    tsense_event_id = event_id;
+
+    tsense_value_pickup_request = 0;
+    tsense_interrupt_counter = 0;
+
+    tsense_timer_config(TIMER_MODE_16BIT, TSENSE_TIMER_CONFIG_TIMER, TSENSE_TIMER_COUNT_IF_INT0_HIGH);
+
+    TSENSE_MCU_TIMER_INTERRUPT_REQUESTS_RESET();
+    TSENSE_MCU_TIMER_GATE_SET(TSENSE_COUNT_REGARDLESS_INT0);
+
+    tsense_measure_period_count = TSENSE_PERIOD_COUNT;
+    tsense_measure_signal_level_flag = TSENSE_SIGNAL_LEVEL_HIGH;
+
+    tsense_timer_value_H = 0;
+    tsense_timer_value_L = 0;
+
+    #ifdef TSENSE_DEBUG_LOG
+    tsense_timer_H_array_ix = 0;
+    tsense_timer_L_array_ix = 0;
+
+    for(i=TSENSE_PERIODS_SKIPPED; i; i--)
+    {
+        tsense_timer_H_value_min[i] = 0xFFFF;
+        tsense_timer_H_value_max[i] = 0;
+        tsense_timer_L_value_min[i] = 0xFFFF;
+        tsense_timer_L_value_max[i] = 0;     
+    }
+    #endif
+
+    tsense_measure_skip_periods = TSENSE_PERIODS_SKIPPED;
+    TSENSE_MCU_TIMER_STOP();
+    TSENSE_MCU_TIMER_RESET();
+
+    // Wait for period start, test incoming pulses
+    if(tsense_sensor_live_test_ok())
+    {
+        TSENSE_MCU_EXTERNAL_INTERRUPT_ENABLE();
+        return(TSENSE_SENSOR_LIVE_OK);
+    }
+    else
+    {
+        event_send(EVENT_TSENSE_ERROR, sensor_id);
+        return(TSENSE_SENSOR_LIVE_ERROR);
+    }
+
+    led_blink(LED_ID_MEASURE);
+}
+
+
+
+// +---------------------------------------------+
+// | Interrupt measuring routine                 |
+// +---------------------------------------------+
+#pragma NOAREGS
+void tsense_interrupt_ex0() interrupt 0 using 1
+{
+    uchar i;
+
+    TSENSE_MCU_EXTERNAL_INTERRUPT_DISABLE();
+    TSENSE_MCU_TIMER_STOP();
+    tsense_timer_value.byte.low = TSENSE_TIMER_L_VALUE;                 // Copy timer value signal High level
+    tsense_timer_value.byte.high = TSENSE_TIMER_H_VALUE;                // Copy timer value signal High level
+    TSENSE_MCU_TIMER_RESTART();
+
+    if(!tsense_measure_skip_periods)
+    {
+        if(tsense_measure_signal_level_flag == TSENSE_SIGNAL_LEVEL_HIGH)
+        {
+            if(tsense_measure_period_count)
+            {
+                tsense_timer_value_H += tsense_timer_value.word;            // Add timer value into High level timer
+                tsense_measure_period_count--;                              // decrement counter
+
+                #if TSENSE_COMPILE_COMPENSATION == 1
+                    // realtime - get smallest period values
+                    for(i=TSENSE_PERIODS_SKIPPED; (i-1); i--)
+                    {
+                        if(tsense_timer_value.word < tsense_timer_H_value_min[i])
+                        {
+                            if(tsense_timer_H_value_min[i-1] > tsense_timer_H_value_min[i])
+                                tsense_timer_H_value_min[i-1] = tsense_timer_value.word;
+                            else
+                                tsense_timer_H_value_min[i] = tsense_timer_value.word;
+                        }
+                    }
+
+                    /*
+                    // realtime - get 2 smallest values;
+                    if((tsense_timer_value.word < tsense_timer_H_value_min_1) ||
+                       (tsense_timer_value.word < tsense_timer_H_value_min_2))
+                    {
+                        if(tsense_timer_H_value_min_2 > tsense_timer_H_value_min_1)
+                            tsense_timer_H_value_min_2 = tsense_timer_value.word;
+                        else
+                            tsense_timer_H_value_min_1 = tsense_timer_value.word;
+                    }
+                    
+                    // realtime - get 2 biggest values;
+                    if((tsense_timer_H_value_max_1 < tsense_timer_value.word) ||
+                       (tsense_timer_H_value_max_2 < tsense_timer_value.word))
+                    {
+                        if(tsense_timer_H_value_max_2 < tsense_timer_H_value_max_1)
+                            tsense_timer_H_value_max_2 = tsense_timer_value.word;
+                        else
+                            tsense_timer_H_value_max_1 = tsense_timer_value.word;
+                    }
+                    */
+                #endif
+
+
+                #ifdef TSENSE_DEBUG_LOG
+                if(tsense_timer_H_array_ix < sizeof(tsense_timer_H_array))
+                {
+                    tsense_timer_H_array[tsense_timer_H_array_ix] = tsense_timer_value.word;
+                    tsense_timer_H_array_ix++;
+                }
+                #endif
+            }
+            else
+            {
+                tsense_measure_skip_periods = TSENSE_PERIODS_SKIPPED;       // skip next pulse
+                tsense_measure_period_count = TSENSE_PERIOD_COUNT;          // Set num of measured periods
+                tsense_measure_signal_level_flag = TSENSE_SIGNAL_LEVEL_LOW; // Switch measure signal level timer
+                TSENSE_MCU_TIMER_GATE_SET(TSENSE_COUNT_WHILE_INT0_HIGH);
+            }
+        }
+        else
+        {        
+            if(tsense_measure_period_count)
+            {
+                tsense_timer_value_L += tsense_timer_value.word;            // Add timer value into Low level timer
+                tsense_measure_period_count--;                              // decrement counter
+
+                #if TSENSE_COMPILE_COMPENSATION == 1
+                    /*
+                    // realtime - get 2 smallest values;
+                    if((tsense_timer_value.word < tsense_timer_L_value_min_1) ||
+                       (tsense_timer_value.word < tsense_timer_L_value_min_2))
+                    {
+                        if(tsense_timer_L_value_min_2 > tsense_timer_L_value_min_1)
+                            tsense_timer_L_value_min_2 = tsense_timer_value.word;
+                        else
+                            tsense_timer_L_value_min_1 = tsense_timer_value.word;
+                    }
+                    
+                    // realtime - get 2 biggest values;
+                    if((tsense_timer_L_value_max_1 < tsense_timer_value.word) ||
+                       (tsense_timer_L_value_max_2 < tsense_timer_value.word))
+                    {
+                        if(tsense_timer_L_value_max_2 < tsense_timer_L_value_max_1)
+                            tsense_timer_L_value_max_2 = tsense_timer_value.word;
+                        else
+                            tsense_timer_L_value_max_1 = tsense_timer_value.word;
+                    }
+                    */
+                #endif
+
+                #ifdef TSENSE_DEBUG_LOG
+                if(tsense_timer_L_array_ix < sizeof(tsense_timer_L_array))
+                {
+                    tsense_timer_L_array[tsense_timer_L_array_ix] = tsense_timer_value.word;
+                    tsense_timer_L_array_ix++;
+                }
+                #endif
+            }
+            else
+            {
+                tsense_value_pickup_request = 1;
+            }
+        }
+    }
+    else
+    {
+        tsense_measure_skip_periods--;
+    }
+
+    // if measure completed
+    if(tsense_value_pickup_request)
+    {
+        TSENSE_MCU_TIMER_STOP();
+        TSENSE_MCU_TIMER_RESET();
+    }
+    else
+    {
+        TSENSE_MCU_EXTERNAL_INTERRUPT_ENABLE();
+    }
+
+    tsense_interrupt_counter++;
+}
+#pragma AREGS
+
+
+// +----------------------------------------------------+
+// | Reset task buffer variables, fill buffer by zeroes |
+// +----------------------------------------------------+
+void tsense_task_buffer_reset()
+{
+    uchar i;
+
+    tsense_task_ix_wr  = 0;                    // reset index for task write 
+    tsense_task_ix_rd  = 0;                    // reset index for task read 
+    tsense_task_in_buf = 0;                    // reset number of pieces in buffer
+    tsense_task_missed_flag = 0;               // reset flag of buffer overload
+    tsense_task_buf_empty_flag = 0;            // reset flag to generate buffer emptied event
+
+    // fill task buffer by zeroes
+    for(i = TSENSE_TASK_BUFFER_SIZE-1; i; i--)
+    {
+        tsense_task_buf[i].sensor_id = 0;
+        tsense_task_buf[i].event_id = 0;
+    }
+}
+
+
+// +---------------------------------------------+
+// | Driver init, variables init                 |
+// +---------------------------------------------+
+void tsense_init()
+{
+    tsense_task_buffer_reset();
+    tsense_mcu_init();                             // Run MCU variation code, counter & interrupt settings 
+}
+
+
+// +---------------------------------------------+
+// | Driver process                              |
+// +---------------------------------------------+
+void tsense_proc()
+{
+    uchar i;
+
+    // Zde zkontrolovat, zda je nejaka uloha v bufferu uloh,
+    // pokud ano, vyzvednout ji a cekat na jeji provedeni nebo na vyvolani udalosti
+
+    // if any task in buffer
+    if(tsense_task_in_buf)
+    {
+        tsense_task_ix_rd %= TSENSE_TASK_BUFFER_SIZE;    // index rotate
+        tsense_get_temperature(tsense_task_buf[tsense_task_ix_rd].sensor_id, tsense_task_buf[tsense_task_ix_rd].event_id);
+        tsense_task_ix_rd++;
+        tsense_task_in_buf--;
+    }
+
+    if(tsense_value_pickup_request)
+    {
+        tsense_value_pickup_request = 0;
+
+        #if TSENSE_COMPILE_COMPENSATION == 1
+            
+            for(i=TSENSE_PERIODS_SKIPPED; i; i--)
+            {
+                if((tsense_timer_H_value_min[i]) && (tsense_timer_H_value_min[i] < 0xFFFF))
+                    tsense_timer_value_H -= tsense_timer_H_value_min[i];
+
+                if((tsense_timer_H_value_max[i]) && (tsense_timer_H_value_max[i] < 0xFFFF))
+                    tsense_timer_value_H -= tsense_timer_H_value_min[i];
+
+                if((tsense_timer_L_value_min[i]) && (tsense_timer_L_value_min[i] < 0xFFFF))
+                    tsense_timer_value_L -= tsense_timer_L_value_min[i];
+
+                if((tsense_timer_L_value_max[i]) && (tsense_timer_L_value_max[i] < 0xFFFF))
+                    tsense_timer_value_L -= tsense_timer_L_value_max[i];
+            }
+    
+            tsense_timer_value_H /= (TSENSE_PERIOD_COUNT - 4);                // calc average time of one pulse
+            tsense_timer_value_L /= (TSENSE_PERIOD_COUNT - 4);                // calc average time of one pulse
+        #else
+            tsense_timer_value_H /= TSENSE_PERIOD_COUNT;                      // calc average time of one pulse
+            tsense_timer_value_L /= TSENSE_PERIOD_COUNT;
+        #endif
+
+        tsense_temperature =  (float) tsense_timer_value_L;
+        tsense_temperature /= (float) tsense_timer_value_H;
+        tsense_temperature *= (float) 212.76596;
+        tsense_temperature -= (float)  68.08511;
+
+        //tsense_timer_value_H /= TSENSE_PERIOD_COUNT;                // calc time of one pulse
+        //tsense_timer_value_L /= TSENSE_PERIOD_COUNT;
+        //tsense_timer_value_H -= tsense_timer_value_L;
+        /*
+        tsense_temperature =  (ulong) tsense_timer_value_L * 1000;
+        tsense_temperature /= (ulong) tsense_timer_value_H;
+        tsense_temperature *= (ulong) 21277;
+        tsense_temperature -= (ulong) 6809;
+        */
+
+        // t = (T1/T0 - 0.32) / 0.0047
+        // t = T1 / T0 * 212,77 - 68,09  
+        // 100t = TL / TH * 21277 - 6809
+
+        /*
+        // T0 = H
+        // T1/T0 = 0.32 + 0.0047 * t
+        // t = (T1/T0 - 0.32) / 0.0047
+        // 603                         985
+        tsense_timer_value_H.word -= tsense_timer_value_L.word;
+        tsense_temperature = tsense_timer_value_L.word / tsense_timer_value_H.word;
+        tsense_temperature -= 0.32;
+        tsense_temperature /= 0.0047;
+        */
+
+        event_send(EVENT_TSENSE_FINISH, 0);
+    }
+
+    /*
+    if(tsense_measure_state_flag == TSENSE_MEASURING_RUNNING)
+    {
+        if(!TIMER_TSENSE)
+        {
+            //tsense_stop();
+            tsense_temperature = 0;
+            event_send(EVENT_TSENSE_ERROR, 0);
+        }
+    }
+    */
+
+}
+

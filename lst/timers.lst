@@ -1,0 +1,510 @@
+C51 COMPILER V8.05a   TIMERS                                                               04/16/2009 20:53:44 PAGE 1   
+
+
+C51 COMPILER V8.05a, COMPILATION OF MODULE TIMERS
+OBJECT MODULE PLACED IN .\obj\timers.obj
+COMPILER INVOKED BY: H:\Prglan\Keil\C51\BIN\C51.EXE src\timers.c51 OMF2 INCDIR(.\src) DEBUG CODE PRINT(.\lst\timers.lst)
+                    - OBJECT(.\obj\timers.obj)
+
+line level    source
+
+   1          
+   2            /////////////////////////////////////////////////////////////////////////////
+   3            // +---------------------------------------------------------------------+ //
+   4            // |                   TIME & TIMEOUTS driver for x51                    | //
+   5            // |                  --------------------------------                   | //
+   6            // |                          Version 1.25                               | //
+   7            // |                                                                     | //
+   8            // |                         Thomas Hoodger                              | //
+   9            // |                     Copyright (c) 2005-2008                         | //
+  10            // |                   thomas.hoodger(at)gmail.com                       | //
+  11            // +---------------------------------------------------------------------+ //
+  12            //  Driver for system time and system timeouts                             //
+  13            //                                                                         //
+  14            //                                                                         //
+  15            // ----------------------------------------------------------------------- //
+  16            //                                                                         //
+  17            //  Version history from 1.20:                                             //
+  18            //                                                                         //
+  19            //          ----------------------------------------------                 //
+  20            //     1.21  time_def.k renamed to time.def                                //
+  21            //           prejmenovany ID timoutu na bezny tvar cTm_xxx                 //
+  22            //          ----------------------------------------------                 //
+  23            //     1.22  Slouceny drivery pro MCU RD2 a LPC922                         //
+  24            //           Misto ID timeoutu se pouzivaji primo zkracene                 //
+  25            //           definice timeru                                               //
+  26            //          ----------------------------------------------                 //
+  27            //     1.23  Pridana podminena kompilace pro MCU AT89C51ED2                //
+  28            //           Pridana podminena kompilace systemoveho casu                  //
+  29            //          ----------------------------------------------                 //
+  30            //     1.24  Opravena chyba v rutine preruseni casovece                    //
+  31            //           dekrementace citacu byla volana 2x                            //
+  32            //          ----------------------------------------------                 //
+  33            //     1.25  Opravena chyba v preteceni pri nastaveni roku,                //
+  34            //            typ uint namisto char                                        //
+  35            //          ----------------------------------------------                 //
+  36            //                                                                         //
+  37            // ----------------------------------------------------------------------- //
+  38            /////////////////////////////////////////////////////////////////////////////
+  39          
+  40          #pragma LIST
+  41          #pragma PAGELENGTH(30000);
+  42          #pragma LINES
+  43          
+  44          // -------------------------------------------------------------------------
+  45          #include "target.def"
+  46          #include TARGET_SFR_HEADER
+  47          #include "str.h"
+  48          #include "timers.h"
+  49          #include "timers.def"
+  50          #include "timers.mcu"
+  51          
+  52          // -------------------------------------------------------------------------
+  53          #define uchar unsigned char
+  54          #define uint  unsigned int
+  55          
+  56          // -------------------------------------------------------------------------
+  57          uint TARGET_SMEM timers[TIMERS_COUNT];   // Definice pro obsluhu casoveho limitu
+  58          
+  59          // -------------------------------------------------------------------------
+  60          
+  61          // Kompilovat systemovy cas
+  62          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+                  #include "stdio.h"
+              
+                  struct
+                  {
+                      uint  year;
+                      uchar month;
+                      uchar day;
+                      uchar hour;
+                      uchar min;
+                      uchar sec;
+                  } TARGET_MMEM time;
+                  
+                  uchar TARGET_MMEM time_to_1sec;            // pocitadlo tiku do 1 sekundy
+                  char  TARGET_MMEM time_str[9];             // buffer pro report casoveho udaje jako retezce
+                  char  TARGET_MMEM date_str[12];            // buffer pro report datumu jako retezce
+                  
+              #endif                           
+  80          
+  81          
+  82          
+  83          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Volano z preruseni - sekunda systemoveho casu                      |
+              // +--------------------------------------------------------------------+
+              #pragma NOAREGS
+              void time_systime_seconds()
+              {
+                  time.sec++;                         // pocitej cas
+                      
+                  if(time.sec > 59)
+                  { 
+                      time.sec = 0;
+                      time.min++;
+              
+                      if(time.min>59)
+                      {
+                          time.min=0;
+                          time.hour++;
+              
+                          if(time.hour > 23)
+                          {
+                              time.hour = 0;
+                              time.day++;
+              
+                              if(time.day > 30)
+                              {
+                                  time.day = 0;
+                                  time.month++;
+              
+                                  if(time.month > 12)
+                                  { 
+                                      time.month=0;
+                                      time.year++;
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+              #pragma AREGS
+              #endif
+ 124          
+ 125          
+ 126          
+ 127          // +--------------------------------------------------------------------+
+ 128          // |                         Interrupt - Timer 2                        |
+ 129          // +--------------------------------------------------------------------+
+ 130          #pragma NOAREGS
+ 131          #if (TARGET_MCU==C51RD2) || (TARGET_MCU==C51ED2)
+ 132          void timer_isr() interrupt 5 using 3
+ 133          #endif
+ 134          
+ 135          #if TARGET_MCU == LPC922
+              void timer_isr() interrupt 1 using 3
+              #endif
+ 138          {
+ 139   1          uchar timer_id;
+ 140   1      
+ 141   1          if(timer_mcu_interupt_service())
+ 142   1          {
+ 143   2              // decrement all active timers
+ 144   2              for(timer_id=0; timer_id<TIMERS_COUNT; timer_id++)
+ 145   2                  if(timers[timer_id])
+ 146   2                  {
+ 147   3                      timers[timer_id]--;
+ 148   3                  }
+ 149   2      
+ 150   2              #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+                      if(time_to_1sec)
+                          time_to_1sec--;      // Odpocitavej 1s
+                      else
+                      { 
+                          time_to_1sec = TIME_TICK_TO_1SEC;     // Napln citac pro 1s
+                          time_systime_seconds();
+                      }
+                      #endif
+ 159   2          }
+ 160   1      }
+ 161          #pragma AREGS
+ 162          
+ 163          
+ 164          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemovych hodin                                        |
+              // +--------------------------------------------------------------------+
+              void time_set_time(uchar hour,uchar min,uchar sec)
+              { 
+                  time.hour = hour;
+                  time.min  = min;
+                  time.sec  = sec;
+              }
+              #endif
+ 175          
+ 176          
+ 177          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_date(uint year,uchar month,uchar day)
+              { 
+                  time.year  = year;
+                  time.month = month;
+                  time.day   = day;
+              }
+              #endif
+ 188          
+ 189          
+ 190          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_hour(uchar hour)
+              { 
+                  time.hour = hour;
+              }
+              #endif
+ 199          
+ 200          
+ 201          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_minute(uchar minute)
+              { 
+                  time.min = minute;
+              }
+              #endif
+ 210          
+ 211          
+ 212          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_second(uchar second)
+              { 
+                  time.sec = second;
+              }
+              #endif
+ 221          
+ 222          
+ 223          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_year(uint year)
+              { 
+                  time.year = year;
+              }
+              #endif
+ 232          
+ 233          
+ 234          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_month(uchar month)
+              { 
+                  time.month = month;
+              }
+              #endif
+ 243          
+ 244          
+ 245          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Nastaveni systemoveho data                                         |
+              // +--------------------------------------------------------------------+
+              void time_set_day(uchar day)
+              { 
+                  time.day = day;
+              }
+              #endif
+ 254          
+ 255          
+ 256          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+              // +--------------------------------------------------------------------+
+              // | Report aktualniho casu do retezce                                  |
+              // +--------------------------------------------------------------------+
+              char *time_string()
+              {
+                  sprintf(time_str,"%.2i:%.2i:%.2i", (uint) time.hour, (uint) time.min, (uint) time.sec);  // zapis cas 
+             -do bufferu
+                  //time_str[8] = 0;                                                                   // zapis zero na 
+             -konec
+                  return(time_str);                                                                  // vrat pointer na 
+             -buffer
+              }
+              
+              char *date_string()
+              {
+                  sprintf(date_str, "%i.%i.%i", (uint) time.day, (uint) time.month, (uint) time.year);  // zapis cas do 
+             -bufferu
+                  //date_str[8] = 0;                                                                      // zapis zero 
+             -na konec
+                  return(date_str);                                                                     // vrat pointer 
+             -na buffer
+              }
+              #endif
+ 274          
+ 275          
+ 276          // +--------------------------------------------------------------------+
+ 277          // | Vrati pointer na nazev casovace timer_id                           |
+ 278          // +--------------------------------------------------------------------+
+ 279          /*
+ 280          char * timer_get_name_str(uint timer_id)
+ 281          {
+ 282              if(timer_id < TIMERS_COUNT)
+ 283              {
+ 284                  return(timer_str_array[timer_id]);
+ 285              }
+ 286              else
+ 287              {
+ 288                  return("!TMR ID OUT OF ARRAY!");
+ 289              }
+ 290          }
+ 291          */
+ 292          
+ 293          
+ 294          // +--------------------------------------------------------------------+
+ 295          // |              Nastaveni parametru a start casovace 2                |
+ 296          // +--------------------------------------------------------------------+
+ 297          void timers_init()
+ 298          {
+ 299   1          uchar i;
+ 300   1      
+ 301   1          timers_mcu_init();
+ 302   1      
+ 303   1          for(i=0; i<TIMERS_COUNT; i++) 
+ 304   1          {
+ 305   2              timers[i]=0;
+ 306   2          }
+ 307   1      
+ 308   1          #if SYSTEM_TIME_INCLUDE == INCLUDE_SYSTIME
+                  time_set_time(0, 0, 0);
+                  time_set_date(0, 0, 0);
+                  #endif
+ 312   1      }
+ 313          
+ 314          
+ 315          /*
+ 316              A basic operation consists of timer registers THx and TLx (x= 0, 1) connected in cas-
+ 317              Operations cade to form a 16-bit timer. Setting the run control bit (TRx) in TCON register (see
+ 318              Figure 2-3) turns the timer on by allowing the selected input to increment TLx. When
+ 319              TLx overflows it increments THx; when THx overflows it sets the timer overflow flag
+ 320              (TFx) in TCON register. Setting the TRx does not clear the THx and TLx timer registers.
+ 321              Timer registers can be accessed to obtain the current count or to enter preset values.
+ 322              They can be read at any time but TRx bit must be cleared to preset their values, other-
+ 323              wise the behavior of the timer/counter is unpredictable
+ 324          */
+ 325          
+C51 COMPILER V8.05a   TIMERS                                                               04/16/2009 20:53:44 PAGE 2   
+
+ASSEMBLY LISTING OF GENERATED OBJECT CODE
+
+
+             ; FUNCTION timer_mcu_interupt_service (BEGIN)
+                                           ; SOURCE LINE # 14
+                                           ; SOURCE LINE # 15
+                                           ; SOURCE LINE # 41
+0000 30CF06            JNB     TF2,?C0001
+                                           ; SOURCE LINE # 42
+                                           ; SOURCE LINE # 43
+0003 C2CF              CLR     TF2
+                                           ; SOURCE LINE # 44
+0005 D200        R     SETB    return_value
+                                           ; SOURCE LINE # 45
+0007 8002              SJMP    ?C0002
+0009         ?C0001:
+                                           ; SOURCE LINE # 47
+0009 C200        R     CLR     return_value
+000B         ?C0002:
+                                           ; SOURCE LINE # 49
+000B C2CE              CLR     EXF2
+                                           ; SOURCE LINE # 52
+000D A200        R     MOV     C,return_value
+                                           ; SOURCE LINE # 53
+000F         ?C0003:
+000F 22                RET     
+             ; FUNCTION timer_mcu_interupt_service (END)
+
+             ; FUNCTION timers_mcu_init (BEGIN)
+                                           ; SOURCE LINE # 58
+                                           ; SOURCE LINE # 59
+                                           ; SOURCE LINE # 196
+0000 E4                CLR     A
+0001 F5C9              MOV     T2MOD,A
+                                           ; SOURCE LINE # 210
+0003 F5C8              MOV     T2CON,A
+                                           ; SOURCE LINE # 212
+0005 C2CF              CLR     TF2
+                                           ; SOURCE LINE # 217
+0007 C2CE              CLR     EXF2
+                                           ; SOURCE LINE # 224
+0009 C2CD              CLR     RCLK
+                                           ; SOURCE LINE # 228
+000B C2CC              CLR     TCLK
+                                           ; SOURCE LINE # 232
+000D C2CB              CLR     EXEN2
+                                           ; SOURCE LINE # 237
+000F D2CA              SETB    TR2
+                                           ; SOURCE LINE # 241
+0011 C2C9              CLR     C_T2
+                                           ; SOURCE LINE # 245
+0013 C2C8              CLR     CP_RL2
+                                           ; SOURCE LINE # 267
+0015 75CAFF            MOV     RCAP2L,#0FFH
+                                           ; SOURCE LINE # 268
+0018 75CB87            MOV     RCAP2H,#087H
+                                           ; SOURCE LINE # 270
+001B F5C8              MOV     T2CON,A
+                                           ; SOURCE LINE # 271
+001D C2CF              CLR     TF2
+                                           ; SOURCE LINE # 272
+001F C2CE              CLR     EXF2
+                                           ; SOURCE LINE # 273
+0021 D2AD              SETB    ET2
+                                           ; SOURCE LINE # 274
+0023 D2CA              SETB    TR2
+                                           ; SOURCE LINE # 279
+0025 438F08            ORL     CKCON0,#08H
+                                           ; SOURCE LINE # 281
+0028 43B720            ORL     IPH0,#020H
+                                           ; SOURCE LINE # 282
+002B 53B8DF            ANL     IPL0,#0DFH
+                                           ; SOURCE LINE # 285
+002E 22                RET     
+             ; FUNCTION timers_mcu_init (END)
+
+             ; FUNCTION timer_isr (BEGIN)
+0000 C0E0              PUSH    ACC
+0002 C0D0              PUSH    PSW
+0004 75D018            MOV     PSW,#018H
+                                           ; SOURCE LINE # 132
+                                           ; SOURCE LINE # 141
+0007 120000      R     LCALL   timer_mcu_interupt_service
+000A 5020              JNC     ?C0010
+                                           ; SOURCE LINE # 142
+                                           ; SOURCE LINE # 144
+;---- Variable 'timer_id' assigned to Register 'R7' ----
+000C E4                CLR     A
+000D FF                MOV     R7,A
+000E         ?C0006:
+                                           ; SOURCE LINE # 145
+000E EF                MOV     A,R7
+000F 25E0              ADD     A,ACC
+0011 2400        R     ADD     A,#LOW timers
+0013 F8                MOV     R0,A
+0014 E6                MOV     A,@R0
+0015 FC                MOV     R4,A
+0016 08                INC     R0
+0017 E6                MOV     A,@R0
+0018 4C                ORL     A,R4
+0019 600D              JZ      ?C0008
+                                           ; SOURCE LINE # 146
+                                           ; SOURCE LINE # 147
+001B EF                MOV     A,R7
+001C 25E0              ADD     A,ACC
+001E 2400        R     ADD     A,#LOW timers
+0020 F8                MOV     R0,A
+0021 08                INC     R0
+0022 E6                MOV     A,@R0
+0023 16                DEC     @R0
+0024 18                DEC     R0
+0025 7001              JNZ     ?C0015
+0027 16                DEC     @R0
+0028         ?C0015:
+                                           ; SOURCE LINE # 148
+0028         ?C0008:
+0028 0F                INC     R7
+0029 BF04E2            CJNE    R7,#04H,?C0006
+                                           ; SOURCE LINE # 159
+                                           ; SOURCE LINE # 160
+002C         ?C0010:
+002C D0D0              POP     PSW
+002E D0E0              POP     ACC
+0030 32                RETI    
+             ; FUNCTION timer_isr (END)
+
+             ; FUNCTION timers_init (BEGIN)
+                                           ; SOURCE LINE # 297
+                                           ; SOURCE LINE # 298
+                                           ; SOURCE LINE # 301
+0000 120000      R     LCALL   timers_mcu_init
+                                           ; SOURCE LINE # 303
+;---- Variable 'i' assigned to Register 'R7' ----
+0003         ?C0011:
+                                           ; SOURCE LINE # 304
+                                           ; SOURCE LINE # 305
+0003 7F08              MOV     R7,#08H
+0005 7800        R     MOV     R0,#LOW timers
+0007 E4                CLR     A
+0008         ?C0016:
+0008 F6                MOV     @R0,A
+0009 08                INC     R0
+000A DFFC              DJNZ    R7,?C0016
+                                           ; SOURCE LINE # 306
+                                           ; SOURCE LINE # 312
+000C         ?C0014:
+000C 22                RET     
+             ; FUNCTION timers_init (END)
+
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    128    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =      8    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----       1
+   EDATA SIZE       =   ----    ----
+   HDATA SIZE       =   ----    ----
+   XDATA CONST SIZE =   ----    ----
+   FAR CONST SIZE   =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

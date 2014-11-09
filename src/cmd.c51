@@ -1,0 +1,572 @@
+
+ /////////////////////////////////////////////////////////////////////////////
+ // +---------------------------------------------------------------------+ //
+ // |                      Detekce prikazu a parametru                    | //
+ // |                     ------------------------------                  | //
+ // |                           Verze 1.13.080329                         | //
+ // |                                                                     | //
+ // |                         Copyright Tomas Hujer                       | //
+ // |                             (c) 2005-2008                           | //
+ // |                      thomas.hoodger(at)gmail.com                    | //
+ // |                                                                     | //
+ // +---------------------------------------------------------------------+ //
+ // |  Detekuje sekvencni prikazy podle tabulky prikazu v parametru       | //
+ // |  cmd_detect(*cmd_tab, get_char). cmd_tab je pointer na tab.         | //
+ // |  get_char je promenna kde se sekvencne objevuje testovany znak.     | //
+ // |  Funkce prochazi tabulkou prikazu a prohledava nody, u kazdeho      | //
+ // |  prikazu je udan index nasledujiciho nodu. Jsou prohledavany        | //
+ // |  vsechny nasledne nody, dokud neni nalezen nod se stejnym indexem,  | //
+ // |  jako ma aktualni znak v prikazu. Pokud je nalezen oddelovaci znak  | //
+ // |  (separator) je prikaz kompletni a je vracena hodnota uvedena       | //
+ // |  prislusnem nodu.                                                   | //
+ // |  Tato verze byla vyvinuta pro minimalni naroky na pamet a mnozstvi  | //
+ // |  kodu.                                                              | //
+ // +---------------------------------------------------------------------+ //
+ //                                                                         //
+ //   Version history:                                                      //
+ //    1.01    070823  Prvni evolution verze                                //
+ //                                                                         //
+ //    1.02    071110  Pridana validace tabulky prikazu                     //
+ //                                                                         //
+ //    1.03    071111  Opravena chyba v detekci 1. prikazu                  //
+ //                                                                         //
+ //    1.04    071115  Opravena chyba v nacitani 2. a dalsich parametru     //
+ //                                                                         //
+ //    1.05    071218  Opravena sekvencni chyba, v urcite posloupnosti      //
+ //                    prikazu se mohlo stat, ze na zacatku prikazu         //
+ //                    nebyl vynulovan index a prikaz tak nebyl detekovat   //
+ //                    pripadu bylo minimum, napr. EEPREADH a ERRDEF        //
+ //                    byl index prikazu vynulovan az po E druheho prikazu  //
+ //                                                                         //
+ //    1.10    071218  Upraveno pro vice instanci                           //
+ //                    kazda instance ma vlastni pointer na buffer prikazu  //
+ //                    pointer nutno inicializovat po startu                //
+ //                                                                         //
+ //    1.11    071219  Funkce cmd_get_par_num upravena pro vice instanci    //
+ //                                                                         //
+ //    1.12    080329  Pridany funkce pro povoleni zobrazeni znaku          //
+ //                                                                         //
+ //                    pokud probiha ukladani parametru (pro backspace)     //
+ //                    bit cmd_get_par_save_state(uchar session_id)         //
+ //                                                                         //
+ //                    pokud neni plny buffer parametru (pro echo. znaku)   //
+ //                    bit cmd_char_print_allowed(uchar session_id)         //
+ //                                                                         //
+ //    1.13    080422  Pridan vypis vsech prikazu tabulky                   //
+ //                                                                         //
+ //    1.14    080520  Doplnen specialni znak '>' - pokud je prikaz konci   //
+ //                    timto znakem, neuklada se parametr a neceka se       //
+ //                    na odradkovani pro dokonceni prikazu                 //
+ //                                                                         //
+ /////////////////////////////////////////////////////////////////////////////
+
+
+#define uchar unsigned char
+#define uint unsigned int
+
+#include <stdio.h>
+#include "target.def"
+#include "cmd.h"
+#include "str.h"
+
+
+#define CMD_SEPARATOR    '@'
+#define CMD_NODE_ID      cmd[session_id].cmd_tab[cmd_offs]              // Node start (separator)
+#define CMD_NODE_IX      cmd[session_id].cmd_tab[cmd_offs + 1]          // Node index
+#define CMD_NEXT_NODE    cmd[session_id].cmd_tab[cmd_offs + 2]          // Next node index
+#define CMD_ID           cmd[session_id].cmd_tab[cmd_offs + 3]          // Command ID
+
+
+typedef enum {
+    CMD_SAVE_PAR_FLAG = 1,
+    CMD_SPACE_SKIP    = 2,
+    CMD_NEW_COMMAND   = 4,
+};
+
+
+typedef struct {
+        uchar *cmd_tab;            // pointer na tabulku prikazu
+        uint   cmd_tab_size;       // velikost tabulky prikazu
+
+        uchar *cmd_par_buf;        // parameter buffer pointer
+        uchar  cmd_par_buf_ix;     // parameter index
+        uchar  cmd_par_cnt;        // paramaters count 
+        uchar  cmd_par_buf_size;   // velikost bufferu parametru
+
+        uint   cmd_offset;         // index zacatku aktualniho prikazu
+        uint   cmd_ix;             // index v prikazu (pozice od offsetu)
+        
+        uchar  cmd_state;          // CMD_PAR_SAVE | CMD_SPACE_SKIP | CMD_NEW_COMMAND
+} t_cmd;
+
+
+t_cmd TARGET_XMEM cmd[CMD_SESSIONS_COUNT];
+
+
+//----------------------------------------------------------------------------------
+
+
+
+
+// +-----------------------------------------+
+// |    Vrati ukazatel na n-ty parametr      |
+// +-----------------------------------------+
+char *cmd_getpar(uchar session_id, uchar index)
+{
+    uchar i;
+    uchar ct;
+    
+    i=1;                                                               // Nastav index prvniho paramatru
+    ct=0;                                                              // Nuluj citac parametru
+    while(ct!=index)                                                   // Citej parametry dokud neni cislo parametru stejne jako index
+    {
+        if(ct == index) break;                                           // Pokud je cislo parametru stejne jako index, parametr nalezen, konci
+
+        if(!cmd[session_id].cmd_par_buf[i])
+             ct++;                                                       // Pokud je nalezena #0, pokracuj s dalsim parametrem
+        i++;                                                             // Inc index v bufferu
+    }
+    return(cmd[session_id].cmd_par_buf + i);                             // Vrat skutecnou adresu parametru
+}
+
+
+// +-----------------------------------------------+
+// | Vrati cislo zkonvertovane z n-teho parametru  |
+// +-----------------------------------------------+
+int cmd_getparnum(uchar session_id, uchar index, uchar omez)
+{
+    uchar Num[5];
+    uchar IxNum,IxPar;
+    uint  DestInt;
+    uint  Nasob;
+    uchar Ch;
+    bit   number_flag;
+    
+    for(IxNum=0; IxNum<5; IxNum++)
+        Num[IxNum]=0;       // Nuluj buffer
+    
+    // Nacti cislice do bufferu
+    IxNum = 0;
+    IxPar = 0;
+    number_flag = 0;
+    
+    if(cmd_getpar(session_id, index)[0] == '-')
+        number_flag = 1;
+    
+    while(IxNum < 5)                                   // 5 cislic (Dec Int)
+    {
+        if(Ch = cmd_getpar(session_id, index)[IxPar])
+        {
+            if(!str_is_num(Ch))
+            {
+                IxPar++;
+            }
+            else
+            {
+                Num[IxNum]=Ch; IxNum++; IxPar++;
+            }
+        }
+        else
+            break;    
+    }
+
+    // IxNum...PocetCislic
+    if((omez) && (omez < IxNum)) IxNum = omez;  // Omezeni poctu cislic
+
+    // Vypocitej integer ze znaku v parametru
+    Nasob = 1;                          // Nastav pocatecniho nasobitele
+    DestInt = 0;                        // Nuluj vysledne cislo
+    while(IxNum)
+    {
+        DestInt += (Num[IxNum-1]-'0') * Nasob; // pocitej
+        Nasob *= 10;
+        IxNum--;
+    }
+
+    if(number_flag)              // pokud nastaven flag zaporneho cisla
+        DestInt = -DestInt;          // nastav flag
+
+    return(DestInt);
+}
+
+
+// +------------------------+
+// | Vrati pocet parametru  |
+// +------------------------+
+char cmd_par_count(uchar session_id)
+{
+    return(cmd[session_id].cmd_par_cnt);
+}
+
+
+// +----------------------------------------------------------+
+// | Vrati stav ukladani parametru pro specifikovanou session |
+// +----------------------------------------------------------+
+#if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+bit cmd_get_par_save_state(uchar session_id)
+{
+    if(cmd[session_id].cmd_par_buf_ix)
+        return(1);
+    else
+        return(0);
+}
+#endif
+
+
+// +--------------------------------------------------------------------------+
+// | Vraci 1, pokud je detekovan prikaz nebo dokud neni plny buffer parametru |
+// +--------------------------------------------------------------------------+
+#if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+bit cmd_char_print_allowed(uchar session_id)
+{
+    if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)
+        return(1);
+    else
+        return(0);
+}
+#endif
+
+
+// +--------------------------------------------------------+
+// | Porovnava znak v get_char se znaky v tabulce cmd_tab   |
+// +--------------------------------------------------------+
+char cmd_detect(uchar session_id, uchar get_char)
+{
+    uchar out;
+    uchar curr_char;
+    int   node_ix;
+
+    #define SEPARATOR    '@'
+
+    // Predchozi znak pro porovnani
+    #define PREV_CHAR    cmd[session_id].cmd_tab[cmd[session_id].cmd_ix + cmd[session_id].cmd_offset + 3 - NODE_IX]
+
+    // Aktualni znak pro porovnani
+    #define CURR_CHAR    cmd[session_id].cmd_tab[cmd[session_id].cmd_ix + cmd[session_id].cmd_offset + 4 - NODE_IX]
+
+    // Node index
+    #define NODE_IX      cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 1]
+
+    // Next node index
+    #define NEXT_NODE    cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 2]
+
+    // Node value
+    #define NODE_VALUE   cmd[session_id].cmd_tab[cmd[session_id].cmd_offset + 3]
+    
+
+    if(cmd[session_id].cmd_state & CMD_SAVE_PAR_FLAG)              // pokud je aktivni ukladani parametru
+    {
+        switch(get_char)
+        {
+            case '/':                                              // Znaky pro dalsi parametr
+            case '.':
+            case ':':
+            case ',':
+            case ' ':
+                if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)           // pokud je v bufferu misto
+                {
+                    if(!(cmd[session_id].cmd_state & CMD_SPACE_SKIP)) 
+                    {
+                        cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;        // zapis konec aktualniho parametru
+                        cmd[session_id].cmd_par_buf_ix++;                                       // posun index
+                        cmd[session_id].cmd_par_cnt++;                                          // inc par count
+                    }
+
+                    if(get_char == ' ')  
+                        cmd[session_id].cmd_state |= CMD_SPACE_SKIP;              // aktivace vynechani mezer
+                    else
+                        cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;             // deaktivace vynechani mezer
+                }
+                break;                                 
+
+            case ';':                                              // Konec ukladani parametru
+            case '@':
+            case '*':
+            case '#':
+            //case '>':
+            case  10:
+            case  13:   
+                if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)  // pokud je v bufferu misto
+                {
+                    cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;   // zapis konec aktualniho parametru
+                }
+
+                cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_size - 1] = 0;  // zapis konec bufferu pro jistotu
+
+                cmd[session_id].cmd_state &= ~CMD_SAVE_PAR_FLAG;        // deaktivace modu zachytavani parametru
+
+                out = NODE_VALUE;                                       // set output value
+                cmd[session_id].cmd_offset = 0;                         // reset command offset
+                
+                // pozn. zde neresetovat index parametru, 
+                // bud nastavit priznak a resetovat pozdeji nebo zkopirovat                                          
+                // cmd_par_buf_ix = 0;                                // reset command index
+                cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+
+                return(out);
+                break;
+
+            case 8:                                                // backspace
+                if(cmd[session_id].cmd_par_buf_ix)
+                {
+                    cmd[session_id].cmd_par_buf_ix--;
+                    cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = 0;
+                }
+                break;
+
+            case '"': break;                                         // Uvozovky nezapisovat
+
+            default: 
+                if(cmd[session_id].cmd_par_buf_ix < cmd[session_id].cmd_par_buf_size)    // pokud je v bufferu misto
+                {
+                    cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_ix] = get_char;              // zapis aktualni znak
+                    cmd[session_id].cmd_par_buf_ix++; 
+                }
+                else
+                {
+                    cmd[session_id].cmd_par_buf[cmd[session_id].cmd_par_buf_size - 1] = 0;     // zapis konec parametru
+                }
+
+                cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;       // deaktivuj flag vynechani mezer
+                break;
+        }
+    }
+    else
+    {
+        COMPARE:
+
+        if(cmd[session_id].cmd_state & CMD_NEW_COMMAND)                  // if new command expected
+        {
+            cmd[session_id].cmd_state &= ~CMD_NEW_COMMAND;               // reset flag of new command
+            cmd[session_id].cmd_par_buf_ix = 0;                          // reset parameter index
+            cmd[session_id].cmd_ix = 0;                                  // reset indexu prikazu
+        }
+
+        get_char = str_up_char(get_char);         // convert char to UpCase
+    
+        curr_char = CURR_CHAR;                    // get current char
+        if(curr_char == SEPARATOR)
+        {
+            // Pokud nalezen separator, pricti a aktualnimu offsetu aktualni index
+            cmd[session_id].cmd_offset += cmd[session_id].cmd_ix;
+        }
+    
+        curr_char = CURR_CHAR;                // get current char
+        if(curr_char == get_char)          
+        {
+            // pokud jsou znaky shodne
+    
+            CHAR_OK:
+            //printf("CMD %c == %c\r\n", CURR_CHAR, get_char);
+    
+            cmd[session_id].cmd_ix++;                 // posun lokalni index v prikazu
+    
+            curr_char = CURR_CHAR;                    // get current char
+            if(curr_char == '@')                      // test konce prikazu
+            {                              
+                // Prikaz je kompletni
+        
+                if(PREV_CHAR == '>')
+                {
+                    // ukonci detekci prikazu a vratit ID prikazu
+
+                    out = NODE_VALUE;                                       // set output value
+                    cmd[session_id].cmd_offset = 0;                         // reset command offset
+                    
+                    // pozn. zde neresetovat index parametru, 
+                    // bud nastavit priznak a resetovat pozdeji nebo zkopirovat                                          
+                    // cmd_par_buf_ix = 0;                                // reset command index
+                    cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+    
+                    return(out);
+                }
+                else
+                {
+                    //aktivuj ukladani parametru
+
+                    str_reset_buffer(cmd[session_id].cmd_par_buf, cmd[session_id].cmd_par_buf_size);      // clear buffer
+    
+                    cmd[session_id].cmd_par_cnt = 0;                                      // reset poctu parametru
+                    cmd[session_id].cmd_par_buf_ix  = 0;                                  // start offset
+    
+                    cmd[session_id].cmd_state |= CMD_SAVE_PAR_FLAG;                       // aktivuj ukladani parametru
+                    cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;                         // deaktivuj vynechani mezer
+    
+                    return(0);
+                }
+            }
+        }
+        else
+        {
+            // pokud nejsou znaky shodne, nacti dalsi nod, porovnej lokalni index,
+            // pokud je lokalni index > index nodu, prikaz s timto znakem neexistuje, restartuj detekci
+            // pokud je lokalni index < index nodu, hledej dalsi nod
+            // pokud jsou indexy shodne, nastav hodnotu offsetu nodu jako aktualni a opakuj detekci
+    
+            //printf("CMD %c != %c\r\n", CURR_CHAR, get_char);
+    
+            FIND_NEXT_NODE:
+    
+            if(NEXT_NODE)
+            {
+                cmd[session_id].cmd_offset += NEXT_NODE;
+                //printf("nextnode:%i\r\n", (int) cmd_offset);
+        
+                if(cmd[session_id].cmd_ix < NODE_IX)                      
+                {
+                    // novy uzel ma mensi index, pokracuj v hledani dalsiho uzle
+                    //printf("cmd_ix[%i] < NODE_IX[%i], find next node\r\n", (int) cmd_ix, (int) NODE_IX);
+        
+                    goto FIND_NEXT_NODE;
+                }
+        
+                node_ix = NODE_IX;
+                if(cmd[session_id].cmd_ix > node_ix)                      
+                {
+                    // novy uzel ma vetsi index, tedy nebyl nalezen shodny index
+                    // ukonci hledani, spust znovu test shodnosti od nuloveho indexu s aktualnim znakem
+                    //printf("cmd_ix[%i] > NODE_IX[%i], reset\r\n", (int) cmd_ix, (int) NODE_IX);
+        
+                    cmd[session_id].cmd_ix = 0;
+                    cmd[session_id].cmd_offset = 0;
+        
+                    goto COMPARE;
+
+                    // POZN: zde neukoncovat funkci (testovano)
+                }
+        
+                
+                node_ix = NODE_IX;
+                if(cmd[session_id].cmd_ix == node_ix)                      
+                {
+                    // pokracuj v testu shodnosti
+                    //printf("Next node: ix=%i, ofs=%i, val=%i\r\n", cmd_ix, cmd_offset, (int) NODE_VALUE);
+        
+                    curr_char = CURR_CHAR;                    // get current char
+                    if(curr_char == get_char)
+                        goto CHAR_OK;
+                    else
+                        goto FIND_NEXT_NODE;
+                }
+            }
+            else
+            {
+                //printf("Not next node, reset\r\n");
+    
+                cmd[session_id].cmd_ix = 0;
+                cmd[session_id].cmd_offset = 0;
+    
+                //goto COMPARE;
+            }
+        }
+    }
+    return(0);
+}
+
+
+// +---------------------------------------------------+
+// | Kontrola udaju s session a test integrity tabulky |
+// +---------------------------------------------------+
+// | Vraci:                                            |
+// | 1 = session je ok                                 |
+// +---------------------------------------------------+
+bit cmd_validate_test(uchar session_id)
+{
+    uint cmd_offs;
+
+    if(!cmd[session_id].cmd_tab_size)                   // pokud nenastavena velikost tabulky prikazu
+        return(0);
+
+    if(!cmd[session_id].cmd_tab)                        // pokud nenastaven pointer na tabulku prikazu
+        return(0);                                      
+   
+    if(!cmd[session_id].cmd_par_buf)                   // pokud nenastaven pointer na buffer parametru
+        return(0);
+
+    if(!cmd[session_id].cmd_par_buf_size)              // pokud nenastavena velikost bufferu parametru
+        return(0);                                      
+   
+    cmd_offs = 0;
+    
+    while(1)
+    {
+        if(CMD_NODE_ID != CMD_SEPARATOR)                    // pokud nesedi ID zacatku noveho prikazu
+            return(0);
+
+        if((!CMD_NODE_IX) && (!CMD_NEXT_NODE))         // pokud nalezen konec tabulky prikazu
+            return(1);
+
+        if(cmd_offs > cmd[session_id].cmd_tab_size)      // pokud prekrocen konec tabulky
+            return(0);
+
+        cmd_offs += CMD_NEXT_NODE;                      // jdi na dalsi prikaz
+    }
+}
+
+
+// +------------------------------------------------------+
+// | Vypis vsech prikazu specifikovane session_id         |
+// +------------------------------------------------------+
+//#if TARGET_CODE_SIZE != TARGET_CODE_SIZE_TINY
+void cmd_command_list(uchar session_id)
+{
+    uint  TARGET_SMEM  cmd_offs;
+    char  TARGET_SMEM  cmd_buf[15];
+    uchar TARGET_SMEM  cmd_buf_ix;
+    char  TARGET_SMEM  cmd_char;
+
+    cmd_offs = 0;
+    
+    printf(BR" id  command"BR"-------------"BR, (uint) cmd[session_id].cmd_tab[cmd_offs + 3], cmd_buf);
+    while(1)
+    {
+        if(CMD_NODE_ID != CMD_SEPARATOR)                    // pokud nesedi ID zacatku noveho prikazu
+            return;
+
+        if((!CMD_NODE_IX) && (!CMD_NEXT_NODE))              // pokud nalezen konec tabulky prikazu
+            return;
+
+        if(cmd_offs > cmd[session_id].cmd_tab_size)         // pokud prekrocen konec tabulky
+            return;
+
+        for(cmd_buf_ix = 0; cmd_buf_ix < sizeof(cmd_buf); cmd_buf_ix++)
+        {
+            cmd_char = cmd[session_id].cmd_tab[cmd_offs + 4 + cmd_buf_ix];
+            
+            if((cmd_char == SEPARATOR) ||
+               ((cmd_buf_ix + CMD_NODE_IX) == sizeof(cmd_buf)-1))
+            {
+                cmd_buf[cmd_buf_ix + CMD_NODE_IX] = 0;
+                break;
+            }
+
+            cmd_buf[cmd_buf_ix + CMD_NODE_IX] = cmd_char;
+        }
+                                                     
+        printf(" %.2i: %s"BR, (uint) CMD_ID, cmd_buf);
+
+        cmd_offs += CMD_NEXT_NODE;                      // jdi na dalsi prikaz
+    }
+}
+//#endif
+
+
+// +------------------------------------------------------+
+// | Inicializace a zapis parametru pro spec. session     |
+// +------------------------------------------------------+
+// | Po inicializace doporucuji provest cmd_validate_test |
+// +------------------------------------------------------+
+void cmd_init(uchar session_id, char *cmd_tab, int tab_size, char *par_buf, char par_buf_size)
+{
+    cmd[session_id].cmd_offset = 0;
+    cmd[session_id].cmd_ix = 0;
+    cmd[session_id].cmd_par_buf = par_buf;
+    cmd[session_id].cmd_par_buf_size = par_buf_size;
+    cmd[session_id].cmd_tab = cmd_tab;
+    cmd[session_id].cmd_tab_size = tab_size;
+
+    cmd[session_id].cmd_state &= ~CMD_SPACE_SKIP;
+    cmd[session_id].cmd_state &= ~CMD_SAVE_PAR_FLAG;
+    cmd[session_id].cmd_state |= CMD_NEW_COMMAND;
+}
+

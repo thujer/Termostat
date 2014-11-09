@@ -1,0 +1,38 @@
+
+
+#ifndef __CMD_DEF__
+    #define __CMD_DEF__
+
+    typedef enum {
+        CMD_BOOT  = 1,
+        CMD_CALL_ISP,
+        CMD_HELP,
+        CMD_P0,
+        CMD_P1,
+        CMD_INFINITE_LOOP,
+        CMD_LOOP,
+        CMD_TSENSE,
+    };
+
+
+
+    char code CMD_TAB_TERMINAL[] = {
+
+    //      separ nod  length   node_value           0   1   2   3   4   5   6   7
+    //-------------------------------------------------------------------------------
+             '@',  0,     5,    CMD_HELP,           '?',                                 //     HELP
+             '@',  0,     8,    CMD_BOOT,           'B','O','O','T',                     //     BOOT vector reset
+             '@',  0,    12,    CMD_CALL_ISP,       'C','A','L','L',' ','I','S','P',     //     Call boot ISP code
+             '@',  0,     8,    CMD_HELP,           'H','E','L','P',                     //     HWCOM test
+             '@',  0,     9,    CMD_INFINITE_LOOP,  'I','L','O','O','P',                 //     Infinite loop
+             '@',  0,     8,    CMD_LOOP,           'L','O','O','P',                     //     Loop test
+             '@',  0,     6,    CMD_P0,             'P','0',                             //     P0 set
+             '@',  1,     5,    CMD_P1,                 '1',                             //     P1 set
+             '@',  0,    10,    CMD_TSENSE,         'T','S','E','N','S','E',             //     TSENSE
+                  
+             '@',  0,     0                                                              //     End
+    //-------------------------------------------------------------------------------
+    };
+
+
+#endif
